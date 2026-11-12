@@ -19,7 +19,8 @@
     { "src": "img/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ],
   "shortcuts": [
-    { "name": "ลงทะเบียน (เจ้าหน้าที่)", "short_name": "ลงทะเบียน", "url": "./checkin.html?source=shortcut", "icons": [{ "src": "img/icon-192.png", "sizes": "192x192" }] },
+    { "name": "เช็คอินบริษัท (เจ้าหน้าที่)", "short_name": "เช็คอิน", "url": "./checkin.html?source=shortcut", "icons": [{ "src": "img/icon-192.png", "sizes": "192x192" }] },
+    { "name": "ลงทะเบียนให้ผู้เข้างาน", "short_name": "ลงทะเบียน", "url": "./staff-register.html?source=shortcut", "icons": [{ "src": "img/icon-192.png", "sizes": "192x192" }] },
     { "name": "แดชบอร์ด", "short_name": "แดชบอร์ด", "url": "./index.html?source=shortcut", "icons": [{ "src": "img/icon-192.png", "sizes": "192x192" }] },
     { "name": "จัดการผู้ใช้ / QR Code", "short_name": "จัดการ", "url": "./admin.html?source=shortcut", "icons": [{ "src": "img/icon-192.png", "sizes": "192x192" }] }
   ]

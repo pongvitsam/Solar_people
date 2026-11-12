@@ -6,7 +6,7 @@
  * - API (script.google.com) และทุกอย่างอื่น: ไม่แตะ ไม่ cache — ข้อมูลต้องสดเสมอ
  * เปลี่ยน VERSION เมื่อเพิ่ม/ลบไฟล์ใน SHELL
  */
-const VERSION = 'v4';
+const VERSION = 'v5';
 const SHELL_CACHE = 'shell-' + VERSION;
 const FONT_CACHE = 'fonts-' + VERSION;
 const NETWORK_TIMEOUT_MS = 4000;
@@ -34,16 +34,21 @@ async function networkFirst(req) {
   const cache = await caches.open(SHELL_CACHE);
   const url = new URL(req.url);
   const key = url.origin + url.pathname; // เก็บตาม path อย่างเดียว ไม่ให้ cache บวมตาม ?v= / ?source=
+  const net = fetch(req).then((res) => {
+    if (res && res.status === 200 && res.type === 'basic') cache.put(key, res.clone()).catch(() => {});
+    return res;
+  });
+  net.catch(() => {}); // กัน unhandled rejection เมื่อเลิกรอแล้ว
   try {
-    const res = await Promise.race([
-      fetch(req),
+    return await Promise.race([
+      net,
       new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), NETWORK_TIMEOUT_MS)),
     ]);
-    if (res && res.ok && res.type === 'basic') cache.put(key, res.clone());
-    return res;
   } catch (err) {
     const hit = await cache.match(key, { ignoreSearch: true });
     if (hit) return hit;
+    // ไม่มีของใน cache (เปิดครั้งแรกบนเน็ตช้า): รอเครือข่ายต่อ ดีกว่าให้หน้าโหลดไม่ขึ้น
+    try { return await net; } catch (e) { /* ออฟไลน์จริง */ }
     if (req.mode === 'navigate') {
       const fallback = await cache.match('./checkin.html', { ignoreSearch: true });
       if (fallback) return fallback;

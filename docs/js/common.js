@@ -133,12 +133,19 @@
   // ดึงข้อมูลซ้ำเป็นช่วง ๆ หยุดเมื่อแท็บถูกซ่อน และดึงทันทีเมื่อกลับมา
   function poll(fn, ms) {
     let timer = null;
+    let running = false; // กันเรียกซ้อน (เช่น สลับแท็บระหว่างโหลด) ที่ทำให้เกิด timer ซ้ำและยิงเซิร์ฟเวอร์เป็นสองเท่า
     const tick = async () => {
+      if (running) return;
+      running = true;
       clearTimeout(timer);
-      if (!document.hidden) {
-        try { await fn(); } catch (e) { /* แสดงผลใน fn แล้ว */ }
+      try {
+        if (!document.hidden) {
+          try { await fn(); } catch (e) { /* แสดงผลใน fn แล้ว */ }
+        }
+      } finally {
+        running = false;
+        timer = setTimeout(tick, ms);
       }
-      timer = setTimeout(tick, ms);
     };
     document.addEventListener('visibilitychange', () => { if (!document.hidden) tick(); });
     tick();
@@ -216,7 +223,8 @@
     EMAIL_MSG: 'รูปแบบอีเมลไม่ถูกต้อง',
     /** คืนเบอร์ที่เหลือแต่ตัวเลข หรือ null ถ้าไม่ถูกต้อง */
     phone(v) {
-      const d = String(v || '').replace(/\D/g, '');
+      let d = String(v || '').replace(/\D/g, '');
+      if (d.startsWith('66') && d.length === 11) d = '0' + d.slice(2); // +66 81 234 5678 (เหมือนฝั่งเซิร์ฟเวอร์)
       return /^0\d{8,9}$/.test(d) ? d : null;
     },
     email(v) {
