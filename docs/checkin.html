@@ -4,10 +4,12 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>ลงทะเบียนเข้างาน</title>
+  <link rel="preconnect" href="https://script.google.com">
+  <link rel="preconnect" href="https://script.googleusercontent.com" crossorigin>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=3">
+  <link rel="stylesheet" href="styles.css?v=4">
 </head>
 <body>
   <header class="topbar">
@@ -96,13 +98,13 @@
     </form>
   </dialog>
 
-  <script src="js/config.js?v=3"></script>
-  <script src="js/common.js?v=3"></script>
+  <script src="js/config.js?v=4"></script>
+  <script src="js/common.js?v=4"></script>
   <script>
     (function () {
       const { api, cfg, session, escapeHtml, matches, fmtTime, fmtClock, toast, poll } = window.App;
       const $ = (id) => document.getElementById(id);
-      const state = { data: null, filter: 'all', busy: new Set(), poller: null, target: null };
+      const state = { data: null, filter: 'all', busy: new Set(), pending: new Map(), writes: 0, poller: null, target: null };
       const MAX_SHOWN = 100; // แสดงสูงสุดครั้งละ 100 รายการ ให้ค้นหาเพื่อหาที่เหลือ
 
       $('eventName').textContent = cfg.EVENT_NAME;
@@ -158,8 +160,13 @@
       async function load() {
         if ($('appView').hidden) return;
         if ($('checkinDialog').open || $('undoDialog').open) return; // ไม่รีเฟรชระหว่างกดยืนยัน
+        if (state.pending.size) return; // รอให้รายการที่กำลังบันทึกเสร็จก่อน
+        const writesAtStart = state.writes;
         try {
-          setData(await api.get('list'));
+          const changed = await App.list.refresh();
+          // ถ้ามีการเช็คอิน/ยกเลิกระหว่างรอ ข้อมูลชุดนี้อาจเก่ากว่า ให้ทิ้งไป
+          if (state.writes !== writesAtStart || state.pending.size) return;
+          setData(App.list.current, changed);
           $('notice').hidden = true;
         } catch (e) {
           $('live').classList.add('error');
@@ -168,11 +175,24 @@
         }
       }
 
-      function setData(d) {
-        state.data = d;
+      // หน้าจอทำงานบนสำเนา เพื่อให้ข้อมูลจากเซิร์ฟเวอร์ (App.list.current) ไม่ถูกแก้ และคืนค่าได้เมื่อบันทึกล้มเหลว
+      const view = (d) => d && Object.assign({}, d, { companies: d.companies.map((c) => Object.assign({}, c)) });
+
+      function setData(d, changed = true) {
+        if (changed) state.data = view(d);
         $('live').classList.remove('error');
         $('liveText').textContent = 'อัปเดต ' + fmtClock();
-        render();
+        if (changed) { applyPending(); render(); }
+      }
+
+      // ทับข้อมูลจากเซิร์ฟเวอร์ด้วยรายการที่กดไปแล้วแต่ยังบันทึกไม่เสร็จ (optimistic)
+      function applyPending() {
+        if (!state.data || !state.pending.size) return;
+        state.data.companies.forEach((c) => {
+          const patch = state.pending.get(c.id);
+          if (patch) Object.assign(c, patch);
+        });
+        state.data.summary = App.summarize(state.data.companies);
       }
 
       function render() {
@@ -192,8 +212,7 @@
 
         const shown = base
           .filter((c) => state.filter === 'all' || (state.filter === 'arrived') === c.arrived)
-          .sort((a, b) => (a.arrived - b.arrived)
-            || (a.arrived ? String(b.time).localeCompare(String(a.time)) : 0));
+          .sort((a, b) => (a.arrived - b.arrived) || (a.arrived ? b.time - a.time : 0));
 
         if (!shown.length) {
           $('list').innerHTML = `<div class="card empty">${
@@ -219,7 +238,7 @@
               </div>
             </div>
             ${c.arrived
-              ? `<button class="btn btn-ghost" data-undo="${escapeHtml(c.id)}" ${busy ? 'disabled' : ''}>ยกเลิก</button>`
+              ? `<button class="btn btn-ghost" data-undo="${escapeHtml(c.id)}" ${busy ? 'disabled' : ''}>${busy ? 'กำลังบันทึก…' : 'ยกเลิก'}</button>`
               : `<button class="btn btn-primary" data-checkin="${escapeHtml(c.id)}" ${busy ? 'disabled' : ''}>${busy ? 'กำลังบันทึก…' : '✔ มาแล้ว'}</button>`}
           </article>`;
         }).join('') + (more > 0 ? `<div class="card empty">และอีก ${more} รายการ — พิมพ์ชื่อหรือ PEA No. เพื่อค้นหา</div>` : '');
@@ -282,27 +301,42 @@
         run('undo', state.target, {}, `ยกเลิกการลงทะเบียน "${state.target.name}" แล้ว`);
       });
 
+      // อัปเดตหน้าจอทันที (optimistic) แล้วค่อยยืนยันกับเซิร์ฟเวอร์ ถ้าล้มเหลวจะคืนค่าเดิม
       async function run(action, c, extra, okMsg) {
         const s = session.get();
         if (!s) { showLogin(); return; }
+        const patch = action === 'checkin'
+          ? { arrived: true, count: extra.count, time: Date.now(), by: s.user.name }
+          : { arrived: false, count: 0, time: 0, by: '' };
+        state.writes++;
+        state.pending.set(c.id, patch);
         state.busy.add(c.id);
+        applyPending();
         render();
         try {
-          setData(await api.post(action, Object.assign({ token: s.token, id: c.id }, extra)));
+          const r = await api.post(action, Object.assign({ token: s.token, id: c.id }, extra));
+          state.pending.delete(c.id);
+          state.busy.delete(c.id);
+          App.list.accept(r);
+          setData(App.list.current, true);
           toast(okMsg, 'ok');
         } catch (err) {
-          if (!handleAuthError(err)) toast(err.message, 'error');
-          state.poller && state.poller.now();
-        } finally {
+          state.pending.delete(c.id);
           state.busy.delete(c.id);
-          render();
+          if (!handleAuthError(err)) toast(err.message, 'error');
+          // ดึงข้อมูลจริงจากเซิร์ฟเวอร์ (ถ้าไม่มีรายการอื่นค้าง) เพื่อคืนสถานะที่ถูกต้อง
+          if (App.list.current) setData(App.list.current, true);
+          if (!state.pending.size && state.poller) state.poller.now();
         }
       }
 
       /* ---------- Start ---------- */
+      const snap = App.list.snapshot();
+      if (snap) { state.data = view(snap); $('liveText').textContent = 'กำลังอัปเดต…'; }
       const s = session.get();
       if (s && s.token) {
         showApp(s);
+        render();
         // ตรวจว่า session ยังใช้ได้อยู่
         api.post('me', { token: s.token }).then((r) => {
           s.user = r.user; session.set(s); showApp(s);

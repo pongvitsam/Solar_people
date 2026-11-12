@@ -4,10 +4,12 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>แดชบอร์ดลงทะเบียน</title>
+  <link rel="preconnect" href="https://script.google.com">
+  <link rel="preconnect" href="https://script.googleusercontent.com" crossorigin>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=3">
+  <link rel="stylesheet" href="styles.css?v=4">
 </head>
 <body>
   <header class="topbar">
@@ -57,8 +59,8 @@
     </section>
   </main>
 
-  <script src="js/config.js?v=3"></script>
-  <script src="js/common.js?v=3"></script>
+  <script src="js/config.js?v=4"></script>
+  <script src="js/common.js?v=4"></script>
   <script>
     (function () {
       const { api, cfg, escapeHtml, matches, fmtTime, fmtClock, poll } = window.App;
@@ -88,7 +90,7 @@
 
         const query = q.value;
         const arrived = data.companies.filter((c) => c.arrived)
-          .sort((a, b) => String(b.time).localeCompare(String(a.time)));
+          .sort((a, b) => b.time - a.time);
         const pending = data.companies.filter((c) => !c.arrived);
         const fa = arrived.filter((c) => matches(c, query));
         const fp = pending.filter((c) => matches(c, query));
@@ -115,11 +117,12 @@
 
       async function load() {
         try {
-          data = await api.get('list');
+          const changed = await App.list.refresh();
+          data = App.list.current;
           $('notice').hidden = true;
           $('live').classList.remove('error');
           $('liveText').textContent = 'อัปเดตล่าสุด ' + fmtClock();
-          render();
+          if (changed) render();
         } catch (e) {
           $('live').classList.add('error');
           $('liveText').textContent = 'โหลดข้อมูลไม่สำเร็จ';
@@ -131,6 +134,9 @@
         }
       }
 
+      // แสดงข้อมูลล่าสุดที่เคยโหลดไว้ทันที ระหว่างรอข้อมูลใหม่
+      data = App.list.snapshot();
+      if (data) { $('liveText').textContent = 'กำลังอัปเดต…'; render(); }
       poll(load, cfg.REFRESH_MS);
     })();
   </script>

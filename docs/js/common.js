@@ -156,5 +156,50 @@
     }
   });
 
-  window.App = { cfg, api, session, ApiError, escapeHtml, matches, fmtTime, fmtClock, toast, poll };
+  /* ---------- รายชื่อบริษัท ----------
+   * - ส่งเวอร์ชันล่าสุด (v) ไปด้วย ถ้าข้อมูลไม่เปลี่ยน เซิร์ฟเวอร์ตอบสั้น ๆ ไม่ต้องโหลดทั้งก้อน
+   * - เก็บ snapshot ไว้ในเครื่อง เปิดหน้ามาแสดงผลได้ทันทีระหว่างรอข้อมูลใหม่
+   */
+  const SNAP_KEY = 'solar_people_snapshot_v2';
+
+  function expand(r) {
+    return {
+      v: r.v,
+      companies: r.d.c.map((x) => ({ id: x[0], name: x[1], mt: x[2], arrived: !!x[3], count: x[4], time: x[5] || 0, by: x[6] })),
+      summary: r.d.s,
+    };
+  }
+
+  function summarize(companies) {
+    const arrived = companies.filter((c) => c.arrived);
+    return {
+      total: companies.length,
+      arrived: arrived.length,
+      remaining: companies.length - arrived.length,
+      people: arrived.reduce((s, c) => s + (c.count || 0), 0),
+    };
+  }
+
+  const list = {
+    current: null,
+    snapshot() {
+      try {
+        const raw = localStorage.getItem(SNAP_KEY);
+        if (raw) this.current = expand(JSON.parse(raw));
+      } catch (e) { this.current = null; }
+      return this.current;
+    },
+    /** รับผลจาก API (list/checkin/undo) คืนค่า true ถ้าข้อมูลเปลี่ยน */
+    accept(r) {
+      if (r.same && this.current) return false;
+      this.current = expand(r);
+      try { localStorage.setItem(SNAP_KEY, JSON.stringify(r)); } catch (e) { /* ignore */ }
+      return true;
+    },
+    async refresh() {
+      return this.accept(await api.get('list', this.current ? { v: this.current.v } : {}));
+    },
+  };
+
+  window.App = { cfg, api, session, list, summarize, ApiError, escapeHtml, matches, fmtTime, fmtClock, toast, poll };
 })();

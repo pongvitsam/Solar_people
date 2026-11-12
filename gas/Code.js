@@ -102,10 +102,14 @@ function ensureSheet_(ss, name, headers) {
   return sh;
 }
 
+let SS_CACHE_ = null;
+/** เปิด Spreadsheet ครั้งเดียวต่อ request */
 function ss_() {
+  if (SS_CACHE_) return SS_CACHE_;
   const id = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
   if (!id) throw new AppError('NOT_SETUP', 'ระบบยังไม่ได้ตั้งค่า (ให้รัน setup() ใน Apps Script editor)');
-  return SpreadsheetApp.openById(id);
+  SS_CACHE_ = SpreadsheetApp.openById(id);
+  return SS_CACHE_;
 }
 
 /* ------------------------------------------------------------------ */
@@ -128,7 +132,7 @@ function doPost(e) {
 }
 
 const ROUTES = {
-  list: () => listCompanies_(),
+  list: (p) => listCompanies_(p.v),
   login: (p) => login_(p),
   me: (p) => ({ user: auth_(p.token) }),
   checkin: (p) => checkin_(p),
@@ -179,29 +183,73 @@ function toCompany_(r) {
     id: String(r[C.ID]).trim(), // PEA No.
     name: String(r[C.NAME]).trim(),
     mt: String(r[C.MT]).trim(),
-    date: String(r[C.DATE]).trim(),
     arrived: String(r[C.STATUS]).trim() === STATUS_ARRIVED,
     count: Number(r[C.COUNT]) || 0,
-    time: time instanceof Date ? time.toISOString() : (time ? String(time) : ''),
+    time: time instanceof Date ? time.getTime() : 0,
     by: String(r[C.BY]).trim(),
   };
 }
 
-function listCompanies_() {
-  const { values } = readCompanies_();
-  // ใช้เฉพาะแถวที่มีทั้ง PEA No. และชื่อบริษัท
-  const companies = values.map(toCompany_).filter((c) => c.id && c.name);
-  const arrived = companies.filter((c) => c.arrived);
-  return {
-    companies,
-    summary: {
-      total: companies.length,
-      arrived: arrived.length,
-      remaining: companies.length - arrived.length,
-      people: arrived.reduce((s, c) => s + c.count, 0),
-    },
-    serverTime: new Date().toISOString(),
-  };
+/* ---------- Cache รายชื่อ (ลดการอ่าน Sheet) ----------
+ * เก็บ JSON แบบย่อใน CacheService แบ่งเป็นชิ้น (ค่าละไม่เกิน 100KB)
+ * - เช็คอิน/ยกเลิก: เขียนทับ cache ทันที (write-through)
+ * - แก้ไขใน Sheet โดยตรง: เห็นผลภายใน LIST_TTL_SEC วินาที
+ */
+const LIST_TTL_SEC = 30;
+const CHUNK = 90000;
+
+/** แปลงเป็นรูปแบบย่อ: c = [[id, name, mt, arrived(0/1), count, timeMs, by], ...] */
+function buildList_(values) {
+  const rows = [];
+  let arrived = 0, people = 0;
+  values.forEach((r) => {
+    const c = toCompany_(r);
+    if (!c.id || !c.name) return; // ใช้เฉพาะแถวที่มีทั้ง PEA No. และชื่อบริษัท
+    if (c.arrived) { arrived++; people += c.count; }
+    rows.push([c.id, c.name, c.mt, c.arrived ? 1 : 0, c.count, c.time, c.by]);
+  });
+  const json = JSON.stringify({
+    c: rows,
+    s: { total: rows.length, arrived, remaining: rows.length - arrived, people },
+  });
+  const v = Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, json, Utilities.Charset.UTF_8)).slice(0, 12);
+  return { v, json };
+}
+
+function cacheList_(list) {
+  const cache = CacheService.getScriptCache();
+  const parts = {};
+  const n = Math.ceil(list.json.length / CHUNK) || 1;
+  for (let i = 0; i < n; i++) parts['list_' + list.v + '_' + i] = list.json.slice(i * CHUNK, (i + 1) * CHUNK);
+  cache.putAll(parts, LIST_TTL_SEC + 30);
+  cache.put('list_head', JSON.stringify({ v: list.v, n }), LIST_TTL_SEC);
+}
+
+function cachedList_() {
+  const cache = CacheService.getScriptCache();
+  const head = cache.get('list_head');
+  if (!head) return null;
+  const { v, n } = JSON.parse(head);
+  return { v, n, getJson: () => {
+    const keys = Array.from({ length: n }, (_, i) => 'list_' + v + '_' + i);
+    const got = cache.getAll(keys);
+    if (keys.some((k) => got[k] == null)) return null;
+    return keys.map((k) => got[k]).join('');
+  } };
+}
+
+/** ถ้าลูกค้าส่ง v ที่ตรงกับข้อมูลล่าสุดมา ตอบสั้น ๆ ว่าไม่มีการเปลี่ยนแปลง */
+function listCompanies_(clientV) {
+  const hit = cachedList_();
+  if (hit) {
+    if (clientV && clientV === hit.v) return { v: hit.v, same: true };
+    const json = hit.getJson();
+    if (json) return { v: hit.v, d: JSON.parse(json) };
+  }
+  const list = buildList_(readCompanies_().values);
+  cacheList_(list);
+  if (clientV && clientV === list.v) return { v: list.v, same: true };
+  return { v: list.v, d: JSON.parse(list.json) };
 }
 
 function findCompanyRow_(values, id) {
@@ -212,44 +260,48 @@ function findCompanyRow_(values, id) {
   return i;
 }
 
+/** อ่าน-แก้-เขียน ภายใต้ lock แล้วอัปเดต cache จากข้อมูลในหน่วยความจำ (ไม่อ่าน Sheet ซ้ำ) */
+function mutateCompany_(id, fn) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    const { sh, values } = readCompanies_();
+    const i = findCompanyRow_(values, id);
+    const row = fn(toCompany_(values[i])); // [สถานะ, จำนวน, เวลา, ผู้บันทึก]
+    sh.getRange(i + 2, C.STATUS + 1, 1, 4).setValues([row]);
+    SpreadsheetApp.flush();
+    values[i][C.STATUS] = row[0];
+    values[i][C.COUNT] = row[1];
+    values[i][C.TIME] = row[2];
+    values[i][C.BY] = row[3];
+    const list = buildList_(values);
+    cacheList_(list);
+    return { v: list.v, d: JSON.parse(list.json) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 function checkin_(p) {
   const user = auth_(p.token);
   const count = Math.floor(Number(p.count));
   if (!(count >= 1 && count <= 999)) throw new AppError('BAD_INPUT', 'จำนวนคนต้องอยู่ระหว่าง 1–999');
-
-  const lock = LockService.getScriptLock();
-  lock.waitLock(15000);
-  try {
-    const { sh, values } = readCompanies_();
-    const i = findCompanyRow_(values, p.id);
-    const current = toCompany_(values[i]);
+  return mutateCompany_(p.id, (current) => {
     if (current.arrived) {
       throw new AppError('ALREADY', `"${current.name}" ลงทะเบียนไปแล้ว${current.by ? ' โดย ' + current.by : ''}`);
     }
-    const now = new Date();
-    sh.getRange(i + 2, C.STATUS + 1, 1, 4).setValues([[STATUS_ARRIVED, count, now, user.name]]);
     log_('CHECKIN', current, count, user);
-  } finally {
-    lock.releaseLock();
-  }
-  return listCompanies_();
+    return [STATUS_ARRIVED, count, new Date(), user.name];
+  });
 }
 
 function undo_(p) {
   const user = auth_(p.token);
-  const lock = LockService.getScriptLock();
-  lock.waitLock(15000);
-  try {
-    const { sh, values } = readCompanies_();
-    const i = findCompanyRow_(values, p.id);
-    const current = toCompany_(values[i]);
+  return mutateCompany_(p.id, (current) => {
     if (!current.arrived) throw new AppError('NOT_ARRIVED', `"${current.name}" ยังไม่ได้ลงทะเบียน`);
-    sh.getRange(i + 2, C.STATUS + 1, 1, 4).clearContent();
     log_('UNDO', current, current.count, user);
-  } finally {
-    lock.releaseLock();
-  }
-  return listCompanies_();
+    return ['', '', '', ''];
+  });
 }
 
 function log_(action, company, count, user) {
@@ -265,6 +317,24 @@ function readUsers_() {
   const last = sh.getLastRow();
   const values = last < 2 ? [] : sh.getRange(2, 1, last - 1, USER_HEADERS.length).getValues();
   return { sh, values };
+}
+
+/* ---------- Cache รายชื่อผู้ใช้ ----------
+ * แก้ผ่านหน้า admin: มีผลทันที / แก้ในแท็บ Users โดยตรง: มีผลภายใน 2 นาที
+ */
+const USERS_TTL_SEC = 120;
+
+function userValues_() {
+  const cache = CacheService.getScriptCache();
+  const hit = cache.get('users');
+  if (hit) return JSON.parse(hit);
+  const values = readUsers_().values.map((r) => [r[U.USERNAME], r[U.NAME], r[U.ROLE], r[U.ACTIVE]]);
+  cache.put('users', JSON.stringify(values), USERS_TTL_SEC);
+  return values;
+}
+
+function invalidateUsers_() {
+  CacheService.getScriptCache().remove('users');
 }
 
 function toUser_(r) {
@@ -283,7 +353,7 @@ function findUser_(values, username) {
 }
 
 function login_(p) {
-  const { values } = readUsers_();
+  const values = userValues_();
   const i = findUser_(values, p.username);
   if (i < 0 || !String(p.username || '').trim()) throw new AppError('LOGIN_FAILED', 'ไม่พบชื่อผู้ใช้นี้');
   const user = toUser_(values[i]);
@@ -297,7 +367,7 @@ function login_(p) {
 function auth_(token, needAdmin) {
   const username = token && CacheService.getScriptCache().get('s_' + token);
   if (!username) throw new AppError('SESSION_EXPIRED', 'เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่');
-  const { values } = readUsers_();
+  const values = userValues_();
   const i = findUser_(values, username);
   const user = i >= 0 ? toUser_(values[i]) : null;
   if (!user || !user.active) {
@@ -332,6 +402,7 @@ function addUser_(p) {
     if (findUser_(values, username) >= 0) throw new AppError('DUPLICATE', 'มี Username นี้อยู่แล้ว');
     sh.appendRow([username, name, role, true, new Date()]);
     sh.getRange(sh.getLastRow(), U.ACTIVE + 1).insertCheckboxes().check();
+    invalidateUsers_();
   } finally {
     lock.releaseLock();
   }
@@ -353,6 +424,7 @@ function updateUser_(p) {
     if (typeof p.name === 'string' && p.name.trim()) sh.getRange(i + 2, U.NAME + 1).setValue(p.name.trim());
     if (p.role === 'admin' || p.role === 'staff') sh.getRange(i + 2, U.ROLE + 1).setValue(p.role);
     if (typeof p.active === 'boolean') sh.getRange(i + 2, U.ACTIVE + 1).setValue(p.active);
+    invalidateUsers_();
   } finally {
     lock.releaseLock();
   }
@@ -371,6 +443,7 @@ function deleteUser_(p) {
       throw new AppError('FORBIDDEN', 'ไม่สามารถลบบัญชีของตัวเองได้');
     }
     sh.deleteRow(i + 2);
+    invalidateUsers_();
   } finally {
     lock.releaseLock();
   }
