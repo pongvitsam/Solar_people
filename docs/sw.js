@@ -6,7 +6,7 @@
  * - API (script.google.com) และทุกอย่างอื่น: ไม่แตะ ไม่ cache — ข้อมูลต้องสดเสมอ
  * เปลี่ยน VERSION เมื่อเพิ่ม/ลบไฟล์ใน SHELL
  */
-const VERSION = 'v7';
+const VERSION = 'v8';
 const SHELL_CACHE = 'shell-' + VERSION;
 const FONT_CACHE = 'fonts-' + VERSION;
 const NETWORK_TIMEOUT_MS = 4000;
