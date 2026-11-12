@@ -37,7 +37,6 @@ const USERNAME_RE = /^[A-Za-z0-9._-]{2,30}$/;
 const SESSION_GEN = 'pw-1'; // เปลี่ยนค่านี้เมื่อต้องการบังคับให้ทุกคนล็อกอินใหม่
 const PW_MIN = 6;
 const PW_ROUNDS = 200;
-const MAX_LOGIN_FAILS = 5; // ใส่รหัสผิดเกินนี้ภายใน 10 นาที จะถูกล็อกชั่วคราว
 
 /* ------------------------------------------------------------------ */
 /* Setup                                                              */
@@ -849,20 +848,6 @@ function initPasswords() {
 function login_(p) {
   const username = String(p.username || '').trim();
   const password = String(p.password || '');
-  const cache = CacheService.getScriptCache();
-  const failKey = 'lf_' + username.toLowerCase();
-
-  // จองสิทธิ์ลองรหัส 1 ครั้งก่อนตรวจ (อ่าน+เพิ่มตัวนับภายใน lock) — กันการยิงคำขอพร้อมกันเพื่อเลี่ยงตัวนับ
-  const lock = LockService.getScriptLock();
-  if (!lock.tryLock(10000)) throw new AppError('BUSY', 'ระบบมีผู้ใช้งานพร้อมกันจำนวนมาก กรุณาลองอีกครั้ง');
-  let attempts;
-  try {
-    attempts = Number(cache.get(failKey) || 0) + 1;
-    if (attempts <= MAX_LOGIN_FAILS + 1) cache.put(failKey, String(attempts), 600);
-  } finally {
-    lock.releaseLock();
-  }
-  if (attempts > MAX_LOGIN_FAILS) throw new AppError('LOCKED', 'ใส่รหัสผ่านผิดหลายครั้ง กรุณารอ 10 นาทีแล้วลองใหม่');
 
   const values = userValues_();
   const i = username ? findUser_(values, username) : -1;
@@ -872,9 +857,8 @@ function login_(p) {
   if (!user || !user.active || !checkPassword_(password, stored)) {
     throw new AppError('LOGIN_FAILED', 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง หรือบัญชีถูกปิดการใช้งาน');
   }
-  cache.remove(failKey);
   const token = Utilities.getUuid();
-  cache.put('s_' + token, JSON.stringify({ u: user.username, g: SESSION_GEN }), SESSION_TTL_SEC);
+  CacheService.getScriptCache().put('s_' + token, JSON.stringify({ u: user.username, g: SESSION_GEN }), SESSION_TTL_SEC);
   return { token, user };
 }
 
