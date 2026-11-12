@@ -17,7 +17,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=11">
+  <link rel="stylesheet" href="styles.css?v=12">
 </head>
 <body>
   <header class="topbar">
@@ -71,6 +71,8 @@
         <button class="chip" type="button" data-filter="all" aria-pressed="true">ทั้งหมด <b id="fAll">0</b></button>
         <button class="chip" type="button" data-filter="pending" aria-pressed="false">ยังไม่มา <b id="fPending">0</b></button>
         <button class="chip" type="button" data-filter="arrived" aria-pressed="false">มาแล้ว <b id="fArrived">0</b></button>
+        <button class="chip" type="button" data-filter="offlist" aria-pressed="false">นอกรายชื่อ <b id="fOff">0</b></button>
+        <button class="chip" type="button" id="addOfflist" title="ผู้เข้างานจากบริษัทที่ไม่อยู่ในรายชื่อ">+ บริษัทนอกรายชื่อ</button>
       </div>
     </div>
 
@@ -136,8 +138,8 @@
     </form>
   </dialog>
 
-  <script src="js/config.js?v=11"></script>
-  <script src="js/common.js?v=11"></script>
+  <script src="js/config.js?v=12"></script>
+  <script src="js/common.js?v=12"></script>
   <script>
     (function () {
       const { api, cfg, session, escapeHtml, matches, fmtTime, fmtClock, toast, poll } = window.App;
@@ -216,7 +218,10 @@
       }
 
       // หน้าจอทำงานบนสำเนา เพื่อให้ข้อมูลจากเซิร์ฟเวอร์ (App.list.current) ไม่ถูกแก้ และคืนค่าได้เมื่อบันทึกล้มเหลว
-      const view = (d) => d && Object.assign({}, d, { companies: d.companies.map((c) => Object.assign({}, c)) });
+      const view = (d) => d && Object.assign({}, d, {
+        companies: d.companies.map((c) => Object.assign({}, c)),
+        offlist: (d.offlist || []).map((c) => Object.assign({}, c)),
+      });
 
       function setData(d, changed = true) {
         if (changed) state.data = view(d);
@@ -249,13 +254,18 @@
         $('fAll').textContent = base.length;
         $('fPending').textContent = base.filter((c) => !c.arrived).length;
         $('fArrived').textContent = base.filter((c) => c.arrived).length;
+        const offBase = (d.offlist || []).filter((c) => matches(c, query));
+        $('fOff').textContent = offBase.length;
 
-        const shown = base
-          .filter((c) => state.filter === 'all' || (state.filter === 'arrived') === c.arrived)
-          .sort((a, b) => (a.arrived - b.arrived) || (a.arrived ? b.time - a.time : 0));
+        const shown = state.filter === 'offlist'
+          ? offBase.slice().sort((a, b) => b.time - a.time)
+          : base
+            .filter((c) => state.filter === 'all' || (state.filter === 'arrived') === c.arrived)
+            .sort((a, b) => (a.arrived - b.arrived) || (a.arrived ? b.time - a.time : 0));
 
         if (!shown.length) {
           $('list').innerHTML = `<div class="card empty">${
+            state.filter === 'offlist' ? (query ? `ไม่พบบริษัทนอกรายชื่อที่ตรงกับ "${escapeHtml(query)}"` : 'ยังไม่มีบริษัทนอกรายชื่อ — กด "+ บริษัทนอกรายชื่อ" เพื่อเพิ่ม') :
             !d.companies.length ? 'ยังไม่มีรายชื่อบริษัทใน Google Sheet' :
             query ? `ไม่พบบริษัทที่ตรงกับ "${escapeHtml(query)}"` :
             state.filter === 'pending' ? '🎉 ลงทะเบียนครบทุกบริษัทแล้ว' : 'ไม่มีรายการ'}</div>`;
@@ -270,7 +280,7 @@
             <div class="info">
               <div class="name">${escapeHtml(c.name)}</div>
               <div class="meta">
-                <span class="tag">${escapeHtml(c.id)}</span>
+                ${c.offlist ? '<span class="tag off">นอกรายชื่อ</span>' : `<span class="tag">${escapeHtml(c.id)}</span>`}
                 ${c.mt ? `<span>${escapeHtml(c.mt)}</span>` : ''}
                 ${c.arrived
                   ? `<span class="badge">✔ มาแล้ว</span><span class="when-tag">🕒 ${c.time ? fmtClock(new Date(c.time)) + ' น.' : ''}</span><span>${c.count} คน</span>${
@@ -280,7 +290,7 @@
             </div>
             <div class="item-actions">
             <button class="btn btn-ghost" data-people="${escapeHtml(c.id)}" title="ดู/เพิ่มรายชื่อผู้เข้างานของบริษัทนี้">👥 ผู้เข้างาน${c.self ? ` (${c.self})` : ''}</button>
-            ${c.staff
+            ${c.offlist ? '' : c.staff
               ? `<button class="btn btn-ghost" data-undo="${escapeHtml(c.id)}" ${busy ? 'disabled' : ''}>${busy ? 'กำลังบันทึก…' : 'ยกเลิก'}</button>`
               : `<button class="btn ${c.arrived ? 'btn-ghost' : 'btn-primary'}" data-checkin="${escapeHtml(c.id)}" ${busy ? 'disabled' : ''}>${busy ? 'กำลังบันทึก…' : (c.arrived ? '+ บันทึกเพิ่ม' : '✔ มาแล้ว')}</button>`}
             </div>
@@ -294,14 +304,14 @@
       $('searchBox').querySelector('.clear').addEventListener('click', () => {
         q.value = ''; $('searchBox').classList.remove('has-text'); render(); q.focus();
       });
-      document.querySelectorAll('.chip').forEach((chip) => chip.addEventListener('click', () => {
+      document.querySelectorAll('.chip[data-filter]').forEach((chip) => chip.addEventListener('click', () => {
         state.filter = chip.dataset.filter;
-        document.querySelectorAll('.chip').forEach((c) => c.setAttribute('aria-pressed', String(c === chip)));
+        document.querySelectorAll('.chip[data-filter]').forEach((c) => c.setAttribute('aria-pressed', String(c === chip)));
         render();
       }));
 
       /* ---------- Actions ---------- */
-      const byId = (id) => state.data.companies.find((c) => c.id === id);
+      const byId = (id) => state.data.companies.find((c) => c.id === id) || (state.data.offlist || []).find((c) => c.id === id);
 
       $('list').addEventListener('click', (e) => {
         const ci = e.target.closest('[data-checkin]');
@@ -336,12 +346,13 @@
         people.company = c;
         people.list = [];
         people.loading = true;
-        $('pplCompany').textContent = `${c.name} (${c.id})`;
+        $('pplCompany').textContent = c.offlist ? `${c.name} (นอกรายชื่อ)` : `${c.name} (${c.id})`;
         $('pplForm').reset();
         $('pplError').textContent = '';
         renderPeople();
         $('peopleDialog').showModal();
         $('pName').focus();
+        if (!c.id) { people.loading = false; renderPeople(); return; } // บริษัทนอกรายชื่อที่เพิ่งสร้าง
         try {
           const r = await api.post('companyPeople', { token: s.token, id: c.id });
           if (people.company === c) { people.list = r.people; }
@@ -354,9 +365,21 @@
       }
 
       // หลังเพิ่ม/ลบ อัปเดตการ์ดบริษัทให้ตรงกับจำนวนคนทันที
-      function syncCompanyCount(id, n) {
+      function syncCompanyCount(id, n, offName) {
         [state.data, App.list.current].forEach((d) => {
-          const c = d && d.companies.find((x) => x.id === id);
+          if (!d) return;
+          if (offName) { // บริษัทนอกรายชื่อ
+            d.offlist = d.offlist || [];
+            let o = d.offlist.find((x) => x.id === id);
+            if (!o && n > 0) {
+              o = { id, name: offName, mt: '', arrived: true, count: 0, time: Date.now(), by: 'นอกรายชื่อ', staff: false, self: 0, offlist: true };
+              d.offlist.push(o);
+            }
+            if (o) { o.count = n; o.self = n; }
+            if (o && n === 0) d.offlist = d.offlist.filter((x) => x !== o);
+            return;
+          }
+          const c = d.companies.find((x) => x.id === id);
           if (!c) return;
           const staffCount = c.staff ? c.count - (c.self || 0) : 0;
           c.self = n;
@@ -385,12 +408,14 @@
         $('pplError').textContent = '';
         const c = people.company;
         try {
-          const r = await App.postRetry('staffRegister', { token: s.token, id: c.id, name, phone, email, position: $('pPosition').value.trim() });
+          const company = c.offlist ? { offlist: true, companyName: c.name } : { id: c.id };
+          const r = await App.postRetry('staffRegister', Object.assign({ token: s.token, name, phone, email, position: $('pPosition').value.trim() }, company));
+          if (c.offlist && !c.id) { c.id = r.id; $('pplCompany').textContent = `${c.name} (นอกรายชื่อ)`; }
           if (!people.list.some((x) => x.phone === r.phone)) {
             people.list = people.list.concat([{ name: r.name, position: r.position, email: r.email, phone: r.phone, channel: r.channel, time: r.time }]);
           }
           renderPeople();
-          syncCompanyCount(c.id, people.list.length);
+          syncCompanyCount(c.id, people.list.length, c.offlist ? c.name : null);
           $('pplForm').reset();
           $('pName').focus();
           toast(`✔ เพิ่ม ${r.name} เวลา ${fmtClock(new Date(r.time))} น.`, 'ok');
@@ -413,7 +438,7 @@
           await App.postRetry('removePerson', { token: s.token, id: people.company.id, phone: person.phone });
           people.list = people.list.filter((x) => x.phone !== person.phone);
           renderPeople();
-          syncCompanyCount(people.company.id, people.list.length);
+          syncCompanyCount(people.company.id, people.list.length, people.company.offlist ? people.company.name : null);
           toast(`ลบ ${person.name} แล้ว`, 'ok');
         } catch (err) {
           b.disabled = false;
@@ -421,6 +446,13 @@
         }
       });
       $('pplClose').addEventListener('click', () => $('peopleDialog').close());
+
+      $('addOfflist').addEventListener('click', () => {
+        const name = (prompt('ชื่อบริษัท / หน่วยงาน (ที่ไม่อยู่ในรายชื่อ)') || '').trim().replace(/\s+/g, ' ');
+        if (!name) return;
+        if (name.length < 2) { toast('กรุณากรอกชื่อบริษัทอย่างน้อย 2 ตัวอักษร', 'error'); return; }
+        openPeople({ id: null, name, offlist: true, self: 0, count: 0, arrived: false, staff: false });
+      });
 
       function openCheckin(c) {
         if (!c) return;

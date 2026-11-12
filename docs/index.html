@@ -17,7 +17,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=11">
+  <link rel="stylesheet" href="styles.css?v=12">
 </head>
 <body>
   <header class="topbar">
@@ -34,7 +34,8 @@
       <div class="card stat"><div class="label">บริษัททั้งหมด</div><div class="value" id="sTotal">–</div></div>
       <div class="card stat ok"><div class="label">มาแล้ว</div><div class="value" id="sArrived">–</div></div>
       <div class="card stat wait"><div class="label">คงเหลือ</div><div class="value" id="sRemaining">–</div></div>
-      <div class="card stat"><div class="label">จำนวนผู้เข้างาน</div><div class="value" id="sPeople">–</div><div class="sub">คน</div></div>
+      <div class="card stat"><div class="label">ผู้เข้างาน (ในรายชื่อ)</div><div class="value" id="sPeople">–</div><div class="sub">คน</div></div>
+      <div class="card stat off"><div class="label">นอกรายชื่อ</div><div class="value" id="sOffPeople">–</div><div class="sub"><span id="sOffCompanies">0</span> บริษัท · รวมทั้งงาน <b id="sAllPeople">0</b> คน</div></div>
     </section>
 
     <section class="card progress">
@@ -65,10 +66,15 @@
         <ol id="listPending"></ol>
       </div>
     </section>
+
+    <section class="card col off off-panel">
+      <h2>🏢 บริษัทนอกรายชื่อ (กรอกชื่อเอง) <span class="count" id="cOff">0</span></h2>
+      <ol id="listOff"></ol>
+    </section>
   </main>
 
-  <script src="js/config.js?v=11"></script>
-  <script src="js/common.js?v=11"></script>
+  <script src="js/config.js?v=12"></script>
+  <script src="js/common.js?v=12"></script>
   <script>
     (function () {
       const { api, cfg, escapeHtml, matches, fmtTime, fmtClock, poll } = window.App;
@@ -120,7 +126,21 @@
             <span class="meta">${escapeHtml(c.id)}</span>
           </li>`).join('') : `<li class="empty">${query ? 'ไม่พบบริษัทที่ค้นหา' : (data.companies.length ? '🎉 มาครบทุกบริษัทแล้ว' : 'ยังไม่มีรายชื่อบริษัทใน Sheet')}</li>`;
 
-        seen = new Set(arrived.map((c) => c.id));
+        // บริษัทนอกรายชื่อ (แยกจาก 725 บริษัทหลัก)
+        const off = (data.offlist || []).slice().sort((a, b) => b.time - a.time);
+        const fo = off.filter((c) => matches(c, query));
+        $('sOffPeople').textContent = (s.offPeople || 0).toLocaleString('th-TH');
+        $('sOffCompanies').textContent = (s.offCompanies || 0).toLocaleString('th-TH');
+        $('sAllPeople').textContent = (s.allPeople != null ? s.allPeople : s.people).toLocaleString('th-TH');
+        $('cOff').textContent = query ? `${fo.length}/${off.length}` : off.length;
+        $('listOff').innerHTML = fo.length ? fo.map((c, i) => `
+          <li class="${seen && !seen.has(c.id) ? 'fresh' : ''}">
+            <span class="n">${i + 1}.</span>
+            <span class="name">${escapeHtml(c.name)}</span>
+            <span class="meta">${fmtTime(c.time)} · ${c.count} คน</span>
+          </li>`).join('') : `<li class="empty">${query ? 'ไม่พบบริษัทที่ค้นหา' : 'ยังไม่มีผู้ลงทะเบียนนอกรายชื่อ'}</li>`;
+
+        seen = new Set(arrived.map((c) => c.id).concat(off.map((c) => c.id)));
       }
 
       async function load() {

@@ -13,7 +13,7 @@
  */
 
 const SHEET = { COMPANIES: 'Companies', USERS: 'Users', LOG: 'Log', REG: 'Registrations' };
-const BUILD = 'plain-pw-1'; // ใช้ตรวจว่า deployment ใหม่ใช้งานครบทุกเครื่องแล้ว (?action=ping)
+const BUILD = 'offlist-1'; // ใช้ตรวจว่า deployment ใหม่ใช้งานครบทุกเครื่องแล้ว (?action=ping)
 
 const COMPANY_HEADERS = ['PEA No.', 'ชื่อบริษัท', 'เลขที่ มท.', 'ลงวันที่', 'สถานะ', 'จำนวนคน', 'เวลาเข้างาน', 'ผู้บันทึก'];
 const C = { ID: 0, NAME: 1, MT: 2, DATE: 3, STATUS: 4, COUNT: 5, TIME: 6, BY: 7 };
@@ -281,9 +281,16 @@ function buildList_(values, agg) {
     if (isArrived) { arrived++; people += count; }
     rows.push([c.id, c.name, c.mt, isArrived ? 1 : 0, count, times.length ? Math.min(...times) : 0, by, c.arrived ? 1 : 0, reg.n]);
   });
+  // บริษัทนอกรายชื่อ: x = [[id, name, count, firstMs], ...] (ไม่นับรวมกับรายชื่อหลัก)
+  const off = Object.keys(agg.off || {}).map((id) => [id, agg.off[id].name, agg.off[id].n, agg.off[id].first]);
+  const offPeople = off.reduce((n, x) => n + x[2], 0);
   const json = JSON.stringify({
     c: rows,
-    s: { total: rows.length, arrived, remaining: rows.length - arrived, people, self: agg.total },
+    x: off,
+    s: {
+      total: rows.length, arrived, remaining: rows.length - arrived, people, self: agg.total,
+      offCompanies: off.length, offPeople, allPeople: people + offPeople,
+    },
   });
   const v = Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, json, Utilities.Charset.UTF_8)).slice(0, 12);
   return { v, json };
@@ -460,6 +467,23 @@ function companyIndex_() {
   return idx;
 }
 
+const OFFLIST_PREFIX = 'X-';
+
+/** ทำชื่อบริษัทให้อยู่รูปเดียวกัน เพื่อจัดกลุ่ม เช่น "บริษัท เอบีซี จำกัด" = "บจก.เอบีซี" = "ABC Co., Ltd." กับ "abc" */
+function normCompany_(name) {
+  return String(name || '').toLowerCase()
+    .replace(/\(มหาชน\)|มหาชน|บริษัท|บจก\.?|บมจ\.?|จำกัด|ห้างหุ้นส่วนสามัญ|ห้างหุ้นส่วน|หจก\.?|หสม\.?/g, '')
+    .replace(/\b(company|co|ltd|limited|inc|corp|corporation|plc|public)\b\.?/g, '')
+    .replace(/[\s.,()\-_&'"\/]/g, '');
+}
+
+/** รหัสบริษัทนอกรายชื่อ: X- + hash ของชื่อที่ทำให้อยู่รูปเดียวกันแล้ว (ชื่อเดียวกัน = รหัสเดียวกัน) */
+function offlistId_(name) {
+  const key = normCompany_(name) || String(name).trim().toLowerCase();
+  return OFFLIST_PREFIX + Utilities.base64EncodeWebSafe(
+    Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, key, Utilities.Charset.UTF_8)).replace(/[^A-Za-z0-9]/g, '').slice(0, 10);
+}
+
 /** เหลือแต่ตัวเลข และเติม 0 นำหน้าที่ Sheet อาจตัดทิ้ง (เช่น 812345678 → 0812345678) */
 function normPhone_(v) {
   let d = String(v == null ? '' : v).replace(/\D/g, '');
@@ -472,6 +496,7 @@ function normPhone_(v) {
 function regAgg_() {
   const sh = ss_().getSheetByName(SHEET.REG);
   const by = {};
+  const off = {}; // บริษัทนอกรายชื่อ: id → { name, n, first }
   const phones = [];
   let total = 0;
   if (sh && sh.getLastRow() >= 2) {
@@ -483,12 +508,17 @@ function regAgg_() {
       a.n++;
       total++;
       if (t && (!a.first || t < a.first)) a.first = t;
+      if (id.indexOf(OFFLIST_PREFIX) === 0) {
+        const o = off[id] || (off[id] = { name: String(r[R.COMPANY]).trim(), n: 0, first: 0 });
+        o.n++;
+        if (t && (!o.first || t < o.first)) { o.first = t; o.name = String(r[R.COMPANY]).trim() || o.name; }
+      }
       const ph = normPhone_(r[R.PHONE]);
       if (ph) phones.push(ph);
     });
   }
   CacheService.getScriptCache().put('reg_phones', JSON.stringify(phones), 60);
-  return { by, phones, total };
+  return { by, off, phones, total };
 }
 
 function eventCode_() {
@@ -545,9 +575,17 @@ function addPerson_(p, opt) {
   if (!/^0\d{8,9}$/.test(phone)) throw new AppError('BAD_INPUT', 'เบอร์โทรศัพท์ต้องเป็นตัวเลข 9–10 หลัก');
 
   // ตรวจบริษัทจากดัชนีชื่อบริษัท (อ่านแค่ 2 คอลัมน์ และ cache ไว้)
-  const id = String(p.id || '').trim();
-  const companyName = companyIndex_()[id];
-  if (!companyName) throw new AppError('NOT_FOUND', 'ไม่พบบริษัทนี้ในรายชื่อ กรุณาติดต่อโต๊ะลงทะเบียน');
+  let id = String(p.id || '').trim();
+  let companyName;
+  if (p.offlist || id.indexOf(OFFLIST_PREFIX) === 0) {
+    // บริษัทนอกรายชื่อ: ผู้เข้างานพิมพ์ชื่อเอง ระบบจัดกลุ่มชื่อที่เขียนต่างกันให้เป็นบริษัทเดียวกัน
+    companyName = String(p.companyName || '').trim().replace(/\s+/g, ' ');
+    if (companyName.length < 2 || companyName.length > 150) throw new AppError('BAD_INPUT', 'กรุณากรอกชื่อบริษัท/หน่วยงาน');
+    id = offlistId_(companyName);
+  } else {
+    companyName = companyIndex_()[id];
+    if (!companyName) throw new AppError('NOT_FOUND', 'ไม่พบบริษัทนี้ในรายชื่อ กรุณาติดต่อโต๊ะลงทะเบียน');
+  }
   const row = [id, companyName];
 
   const cache = CacheService.getScriptCache();

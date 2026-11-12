@@ -17,7 +17,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=11">
+  <link rel="stylesheet" href="styles.css?v=12">
 </head>
 <body>
   <header class="topbar">
@@ -49,6 +49,14 @@
             <button class="clear" type="button" aria-label="ล้างคำค้นหา">✕</button>
           </label>
           <div id="results" class="results" role="listbox" aria-label="ผลการค้นหาบริษัท"></div>
+          <button class="btn btn-ghost btn-block offlist-link" type="button" id="useOfflist">ไม่พบบริษัทของฉันในรายชื่อ → กรอกชื่อบริษัทเอง</button>
+        </div>
+        <div id="offlistBox" hidden>
+          <div class="field">
+            <label for="fCompany">ชื่อบริษัท / หน่วยงาน *</label>
+            <input id="fCompany" maxlength="150" autocomplete="organization" placeholder="เช่น บริษัท ตัวอย่าง จำกัด">
+          </div>
+          <button class="btn btn-ghost btn-sm" type="button" id="backToList">← กลับไปค้นหาจากรายชื่อ</button>
         </div>
         <div id="picked" class="picked" hidden>
           <div>
@@ -101,8 +109,8 @@
     </section>
   </main>
 
-  <script src="js/config.js?v=11"></script>
-  <script src="js/common.js?v=11"></script>
+  <script src="js/config.js?v=12"></script>
+  <script src="js/common.js?v=12"></script>
   <script>
     (function () {
       const { api, escapeHtml, matches, fmtClock, toast } = window.App;
@@ -122,7 +130,7 @@
       const dateFmt = new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Bangkok' });
       function showDone(r) {
         $('dName').textContent = r.name;
-        $('dCompany').textContent = `${r.company} (${r.id})`;
+        $('dCompany').textContent = String(r.id).indexOf('X-') === 0 ? `${r.company} (นอกรายชื่อ)` : `${r.company} (${r.id})`;
         $('dTime').textContent = `${dateFmt.format(new Date(r.time))} ${fmtClock(new Date(r.time))} น.`;
         show('doneView');
       }
@@ -153,7 +161,7 @@
         if (!query) { $('results').innerHTML = ''; return; }
         const found = state.companies.filter((c) => matches(c, query));
         if (!found.length) {
-          $('results').innerHTML = `<div class="empty">ไม่พบบริษัท "${escapeHtml(query)}"<br>หากไม่มีในรายชื่อ กรุณาติดต่อโต๊ะลงทะเบียน</div>`;
+          $('results').innerHTML = `<div class="empty">ไม่พบบริษัท "${escapeHtml(query)}" ในรายชื่อ<br>กดปุ่มด้านล่างเพื่อกรอกชื่อบริษัทเอง</div>`;
           return;
         }
         $('results').innerHTML = found.slice(0, MAX_RESULTS).map((c) => `
@@ -186,6 +194,25 @@
         q.focus();
       });
 
+      // บริษัทนอกรายชื่อ: กรอกชื่อเอง (ใช้คำที่พิมพ์ค้นหาไว้เป็นค่าเริ่มต้น)
+      state.offlist = false;
+      $('useOfflist').addEventListener('click', () => {
+        state.offlist = true;
+        state.picked = null;
+        $('pickBox').hidden = true;
+        $('picked').hidden = true;
+        $('offlistBox').hidden = false;
+        if (!$('fCompany').value && /\D/.test(q.value)) $('fCompany').value = q.value.trim();
+        $('formError').textContent = '';
+        $('fCompany').focus();
+      });
+      $('backToList').addEventListener('click', () => {
+        state.offlist = false;
+        $('offlistBox').hidden = true;
+        $('pickBox').hidden = false;
+        q.focus();
+      });
+
       /* ---------- ส่งข้อมูล ---------- */
       function fail(msg, el) {
         $('formError').textContent = msg;
@@ -198,7 +225,9 @@
         const position = $('fPosition').value.trim();
         const email = $('fEmail').value.trim();
         const phone = App.validate.phone($('fPhone').value);
-        if (!state.picked) return fail('กรุณาเลือกบริษัท', q);
+        const companyName = $('fCompany').value.trim();
+        if (state.offlist && companyName.length < 2) return fail('กรุณากรอกชื่อบริษัท / หน่วยงาน', $('fCompany'));
+        if (!state.offlist && !state.picked) return fail('กรุณาเลือกบริษัท หรือกด "กรอกชื่อบริษัทเอง"', q);
         if (name.length < 2) return fail('กรุณากรอกชื่อ-นามสกุล', $('fName'));
         if (!position) return fail('กรุณากรอกตำแหน่ง', $('fPosition'));
         if (!App.validate.email(email)) return fail(App.validate.EMAIL_MSG, $('fEmail'));
@@ -212,7 +241,8 @@
         try {
           // BUSY = คิวเต็ม ยังไม่ได้บันทึก จึงส่งซ้ำอัตโนมัติได้อย่างปลอดภัย
           // ถ้าเน็ตหลุดหลังบันทึกแล้วกดส่งซ้ำ เซิร์ฟเวอร์จะตอบสำเร็จพร้อมเวลาเดิม (ไม่ขึ้นว่าเบอร์ซ้ำ)
-          const r = await App.postRetry('register', { code, id: state.picked.id, name, position, email, phone },
+          const company = state.offlist ? { offlist: true, companyName } : { id: state.picked.id };
+          const r = await App.postRetry('register', Object.assign({ code, name, position, email, phone }, company),
             () => { btn.textContent = 'มีผู้ลงทะเบียนจำนวนมาก กำลังลองใหม่…'; });
           const done = { time: r.time, company: r.company, id: r.id, name: r.name, code, savedAt: Date.now() };
           try { localStorage.setItem(DONE_KEY, JSON.stringify(done)); } catch (err) { /* ignore */ }
