@@ -165,7 +165,11 @@
   function expand(r) {
     return {
       v: r.v,
-      companies: r.d.c.map((x) => ({ id: x[0], name: x[1], mt: x[2], arrived: !!x[3], count: x[4], time: x[5] || 0, by: x[6] })),
+      companies: r.d.c.map((x) => ({
+        id: x[0], name: x[1], mt: x[2], arrived: !!x[3], count: x[4], time: x[5] || 0, by: x[6],
+        staff: x[7] == null ? !!x[3] : !!x[7], // เจ้าหน้าที่เช็คอินให้
+        self: x[8] || 0, // จำนวนคนที่ลงทะเบียนเอง
+      })),
       summary: r.d.s,
     };
   }

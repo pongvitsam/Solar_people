@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ลงทะเบียนผู้เข้างาน</title>
+  <link rel="preconnect" href="https://script.google.com">
+  <link rel="preconnect" href="https://script.googleusercontent.com" crossorigin>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css?v=7">
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap">
+      <div class="brand"><span class="logo"><img src="img/pea-logo.png" alt="PEA การไฟฟ้าส่วนภูมิภาค" width="120" height="44"></span><div class="brand-text"><small id="orgName">การไฟฟ้าส่วนภูมิภาค</small><span id="eventName">ลงทะเบียนเข้างาน</span></div></div>
+    </div>
+  </header>
+
+  <main class="wrap reg-wrap">
+    <!-- ===== ไม่มีรหัสงาน ===== -->
+    <section id="noCodeView" class="card reg-card" hidden>
+      <h1>กรุณาสแกน QR Code</h1>
+      <p class="muted">ลิงก์นี้ไม่มีรหัสงาน หรือรหัสงานไม่ถูกต้อง กรุณาสแกน QR Code ที่จุดลงทะเบียนหน้างานอีกครั้ง</p>
+    </section>
+
+    <!-- ===== ฟอร์มลงทะเบียน ===== -->
+    <section id="formView" hidden>
+      <div class="card reg-card">
+        <h1>ลงทะเบียนผู้เข้างาน</h1>
+        <p class="muted">1 คน ลงทะเบียน 1 ครั้ง หากมาจากบริษัทเดียวกันหลายคน ให้แต่ละคนลงทะเบียนของตัวเอง</p>
+
+        <!-- ขั้นที่ 1: เลือกบริษัท -->
+        <div class="step-label">1. เลือกบริษัท</div>
+        <div id="pickBox">
+          <label class="search" id="searchBox">
+            <span class="sr-only">ค้นหาบริษัท</span>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+            <input id="q" type="search" placeholder="พิมพ์ชื่อบริษัท หรือ PEA No." autocomplete="off">
+            <button class="clear" type="button" aria-label="ล้างคำค้นหา">✕</button>
+          </label>
+          <div id="results" class="results" role="listbox" aria-label="ผลการค้นหาบริษัท"></div>
+        </div>
+        <div id="picked" class="picked" hidden>
+          <div>
+            <div class="picked-name" id="pickedName"></div>
+            <div class="muted" id="pickedId"></div>
+          </div>
+          <button class="btn btn-ghost" type="button" id="changeCompany">เปลี่ยน</button>
+        </div>
+
+        <!-- ขั้นที่ 2: ข้อมูลผู้เข้างาน -->
+        <form id="regForm" novalidate>
+          <div class="step-label">2. ข้อมูลผู้เข้างาน</div>
+          <div class="field">
+            <label for="fName">ชื่อ-นามสกุล *</label>
+            <input id="fName" autocomplete="name" maxlength="100" required>
+          </div>
+          <div class="field">
+            <label for="fPosition">ตำแหน่ง *</label>
+            <input id="fPosition" autocomplete="organization-title" maxlength="100" required>
+          </div>
+          <div class="field">
+            <label for="fEmail">อีเมล *</label>
+            <input id="fEmail" type="email" inputmode="email" autocomplete="email" autocapitalize="off" spellcheck="false" maxlength="120" required>
+          </div>
+          <div class="field">
+            <label for="fPhone">เบอร์โทรศัพท์ *</label>
+            <input id="fPhone" type="tel" inputmode="numeric" autocomplete="tel" maxlength="15" placeholder="08xxxxxxxx" required>
+          </div>
+          <label class="consent">
+            <input type="checkbox" id="fConsent">
+            <span>ยินยอมให้ การไฟฟ้าส่วนภูมิภาค เก็บและใช้ข้อมูลข้างต้นเพื่อการลงทะเบียนและติดต่อเกี่ยวกับงานนี้เท่านั้น</span>
+          </label>
+          <p class="error-text" id="formError" role="alert"></p>
+          <button class="btn btn-primary btn-block" type="submit" id="submitBtn">✔ ลงทะเบียน</button>
+        </form>
+      </div>
+    </section>
+
+    <!-- ===== สำเร็จ ===== -->
+    <section id="doneView" class="card reg-card done" hidden>
+      <div class="done-icon" aria-hidden="true">✔</div>
+      <h1>ลงทะเบียนสำเร็จ</h1>
+      <dl class="done-info">
+        <dt>ชื่อ</dt><dd id="dName"></dd>
+        <dt>บริษัท</dt><dd id="dCompany"></dd>
+        <dt>เวลา</dt><dd id="dTime"></dd>
+      </dl>
+      <p class="muted">แสดงหน้านี้ให้เจ้าหน้าที่ดูได้</p>
+      <button class="btn btn-ghost btn-block" type="button" id="another">ลงทะเบียนให้อีกคน</button>
+    </section>
+  </main>
+
+  <script src="js/config.js?v=7"></script>
+  <script src="js/common.js?v=7"></script>
+  <script>
+    (function () {
+      const { api, escapeHtml, matches, fmtClock, toast } = window.App;
+      const $ = (id) => document.getElementById(id);
+      const DONE_KEY = 'solar_people_registered';
+      const MAX_RESULTS = 30;
+      const state = { companies: [], picked: null };
+
+      const code = (new URLSearchParams(location.search).get('code') || '').trim();
+
+      function show(view) {
+        ['noCodeView', 'formView', 'doneView'].forEach((id) => { $(id).hidden = id !== view; });
+        window.scrollTo(0, 0);
+      }
+
+      /* ---------- หน้าสำเร็จ ---------- */
+      const dateFmt = new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Bangkok' });
+      function showDone(r) {
+        $('dName').textContent = r.name;
+        $('dCompany').textContent = `${r.company} (${r.id})`;
+        $('dTime').textContent = `${dateFmt.format(new Date(r.time))} ${fmtClock(new Date(r.time))} น.`;
+        show('doneView');
+      }
+      function loadDone() {
+        try { return JSON.parse(localStorage.getItem(DONE_KEY) || 'null'); } catch (e) { return null; }
+      }
+
+      $('another').addEventListener('click', () => {
+        // เก็บบริษัทเดิมไว้ ล้างเฉพาะข้อมูลบุคคล
+        try { localStorage.removeItem(DONE_KEY); } catch (e) { /* ignore */ }
+        $('regForm').reset();
+        $('formError').textContent = '';
+        show('formView');
+        $('fName').focus();
+      });
+
+      /* ---------- เลือกบริษัท ---------- */
+      const q = $('q');
+      function renderResults() {
+        const query = q.value.trim();
+        $('searchBox').classList.toggle('has-text', !!query);
+        if (!query) { $('results').innerHTML = ''; return; }
+        const found = state.companies.filter((c) => matches(c, query));
+        if (!found.length) {
+          $('results').innerHTML = `<div class="empty">ไม่พบบริษัท "${escapeHtml(query)}"<br>หากไม่มีในรายชื่อ กรุณาติดต่อโต๊ะลงทะเบียน</div>`;
+          return;
+        }
+        $('results').innerHTML = found.slice(0, MAX_RESULTS).map((c) => `
+          <button type="button" class="result" role="option" data-id="${escapeHtml(c.id)}">
+            <span class="result-name">${escapeHtml(c.name)}</span>
+            <span class="tag">${escapeHtml(c.id)}</span>
+          </button>`).join('')
+          + (found.length > MAX_RESULTS ? `<div class="empty">พบ ${found.length} รายการ พิมพ์เพิ่มเพื่อให้แคบลง</div>` : '');
+      }
+      q.addEventListener('input', renderResults);
+      $('searchBox').querySelector('.clear').addEventListener('click', () => { q.value = ''; renderResults(); q.focus(); });
+
+      function pick(c) {
+        state.picked = c;
+        $('pickedName').textContent = c.name;
+        $('pickedId').textContent = 'PEA No. ' + c.id;
+        $('pickBox').hidden = true;
+        $('picked').hidden = false;
+        $('formError').textContent = '';
+        $('fName').focus();
+      }
+      $('results').addEventListener('click', (e) => {
+        const b = e.target.closest('[data-id]');
+        if (b) pick(state.companies.find((c) => c.id === b.dataset.id));
+      });
+      $('changeCompany').addEventListener('click', () => {
+        state.picked = null;
+        $('picked').hidden = true;
+        $('pickBox').hidden = false;
+        q.focus();
+      });
+
+      /* ---------- ส่งข้อมูล ---------- */
+      function fail(msg, el) {
+        $('formError').textContent = msg;
+        if (el) el.focus();
+      }
+
+      $('regForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const name = $('fName').value.trim();
+        const position = $('fPosition').value.trim();
+        const email = $('fEmail').value.trim();
+        const phone = $('fPhone').value.replace(/\D/g, '');
+        if (!state.picked) return fail('กรุณาเลือกบริษัท', q);
+        if (name.length < 2) return fail('กรุณากรอกชื่อ-นามสกุล', $('fName'));
+        if (!position) return fail('กรุณากรอกตำแหน่ง', $('fPosition'));
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) return fail('รูปแบบอีเมลไม่ถูกต้อง', $('fEmail'));
+        if (!/^0\d{8,9}$/.test(phone)) return fail('เบอร์โทรศัพท์ต้องขึ้นต้นด้วย 0 และมี 9–10 หลัก', $('fPhone'));
+        if (!$('fConsent').checked) return fail('กรุณาติ๊กยินยอมการเก็บข้อมูล', $('fConsent'));
+
+        const btn = $('submitBtn');
+        btn.disabled = true;
+        btn.textContent = 'กำลังบันทึก…';
+        $('formError').textContent = '';
+        try {
+          const r = await api.post('register', { code, id: state.picked.id, name, position, email, phone });
+          try { localStorage.setItem(DONE_KEY, JSON.stringify(r)); } catch (err) { /* ignore */ }
+          showDone(r);
+        } catch (err) {
+          if (err.code === 'BAD_CODE') { show('noCodeView'); return; }
+          fail(err.code === 'NETWORK' ? 'ส่งข้อมูลไม่สำเร็จ ตรวจสอบอินเทอร์เน็ตแล้วกดลงทะเบียนอีกครั้ง' : err.message);
+        } finally {
+          btn.disabled = false;
+          btn.textContent = '✔ ลงทะเบียน';
+        }
+      });
+
+      /* ---------- เริ่มต้น ---------- */
+      if (!code) { show('noCodeView'); return; }
+      const done = loadDone();
+      if (done) { showDone(done); } else { show('formView'); }
+
+      // โหลดรายชื่อบริษัทครั้งเดียว (ไม่รีเฟรชอัตโนมัติ เพื่อลดโหลดเซิร์ฟเวอร์)
+      const snap = App.list.snapshot();
+      if (snap) state.companies = snap.companies;
+      App.list.refresh()
+        .then(() => { state.companies = App.list.current.companies; renderResults(); })
+        .catch((err) => { if (!state.companies.length) toast('โหลดรายชื่อบริษัทไม่สำเร็จ กรุณารีเฟรชหน้า', 'error'); });
+    })();
+  </script>
+</body>
+</html>

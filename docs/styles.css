@@ -240,3 +240,48 @@ th { font-size: .85rem; color: var(--muted); font-weight: 500; }
 dialog .when { margin: -8px 0 16px; color: var(--muted); }
 dialog .when b { color: var(--text); font-size: 1.15rem; font-variant-numeric: tabular-nums; }
 .item .when-tag { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--ok); }
+
+/* ---------- Register (ผู้เข้างาน) ---------- */
+.reg-wrap { max-width: 560px; padding-top: 16px; padding-bottom: 40px; }
+.reg-card { padding: 20px; }
+.reg-card h1 { margin: 0 0 6px; font-size: 1.35rem; }
+.muted { color: var(--muted); }
+.reg-card > .muted { margin: 0 0 8px; font-size: .92rem; }
+.step-label { font-weight: 600; margin: 18px 0 8px; }
+.results { display: grid; gap: 6px; margin-top: 8px; max-height: 50vh; overflow: auto; }
+.result {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px; text-align: left;
+  padding: 12px 14px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface); cursor: pointer;
+}
+.result:hover, .result:focus-visible { border-color: var(--brand); outline: none; }
+.result-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.results .empty { padding: 14px; }
+.picked {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px;
+  border-radius: 12px; background: var(--ok-soft); border: 1px solid color-mix(in srgb, var(--ok) 35%, var(--border));
+}
+.picked-name { font-weight: 600; overflow-wrap: anywhere; }
+.consent { display: flex; gap: 10px; align-items: flex-start; font-size: .9rem; color: var(--muted); margin: 6px 0 12px; cursor: pointer; }
+.consent input { width: 20px; height: 20px; flex: none; margin-top: 2px; accent-color: var(--ok); }
+.btn-block { width: 100%; padding: 14px; font-size: 1.05rem; }
+.done { text-align: center; }
+.done-icon {
+  width: 72px; height: 72px; border-radius: 50%; margin: 6px auto 12px; display: grid; place-items: center;
+  background: var(--ok); color: #fff; font-size: 2.2rem; font-weight: 700;
+}
+.done-info { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; text-align: left; margin: 16px 0; padding: 14px; background: var(--surface-2); border-radius: 12px; }
+.done-info dt { color: var(--muted); }
+.done-info dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+.done .btn-block { margin-top: 8px; }
+
+/* ---------- Admin: QR ---------- */
+.qr-row { display: grid; grid-template-columns: auto 1fr; gap: 20px; padding: 16px; align-items: start; }
+.qr-box { background: #fff; padding: 12px; border-radius: 12px; line-height: 0; }
+.qr-link { overflow-wrap: anywhere; font-size: .9rem; color: var(--muted); }
+.code-form { display: flex; gap: 8px; flex-wrap: wrap; align-items: end; margin-top: 12px; }
+.code-form .field { margin: 0; }
+@media (max-width: 600px) { .qr-row { grid-template-columns: 1fr; justify-items: center; text-align: center; } }
+@media print {
+  .topbar, .no-print, .toasts { display: none !important; }
+  body { background: #fff; }
+}

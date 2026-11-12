@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=6">
+  <link rel="stylesheet" href="styles.css?v=7">
 </head>
 <body>
   <header class="topbar">
@@ -99,8 +99,8 @@
     </form>
   </dialog>
 
-  <script src="js/config.js?v=6"></script>
-  <script src="js/common.js?v=6"></script>
+  <script src="js/config.js?v=7"></script>
+  <script src="js/common.js?v=7"></script>
   <script>
     (function () {
       const { api, cfg, session, escapeHtml, matches, fmtTime, fmtClock, toast, poll } = window.App;
@@ -234,13 +234,14 @@
                 <span class="tag">${escapeHtml(c.id)}</span>
                 ${c.mt ? `<span>${escapeHtml(c.mt)}</span>` : ''}
                 ${c.arrived
-                  ? `<span class="badge">✔ มาแล้ว</span><span class="when-tag">🕒 ${c.time ? fmtClock(new Date(c.time)) + ' น.' : ''}</span><span>${c.count} คน</span>${c.by ? `<span>บันทึกโดย ${escapeHtml(c.by)}</span>` : ''}`
+                  ? `<span class="badge">✔ มาแล้ว</span><span class="when-tag">🕒 ${c.time ? fmtClock(new Date(c.time)) + ' น.' : ''}</span><span>${c.count} คน</span>${
+                      c.staff ? (c.by ? `<span>บันทึกโดย ${escapeHtml(c.by)}</span>` : '') : `<span>ลงทะเบียนเอง ${c.self} คน</span>`}`
                   : '<span>ยังไม่มา</span>'}
               </div>
             </div>
-            ${c.arrived
+            ${c.staff
               ? `<button class="btn btn-ghost" data-undo="${escapeHtml(c.id)}" ${busy ? 'disabled' : ''}>${busy ? 'กำลังบันทึก…' : 'ยกเลิก'}</button>`
-              : `<button class="btn btn-primary" data-checkin="${escapeHtml(c.id)}" ${busy ? 'disabled' : ''}>${busy ? 'กำลังบันทึก…' : '✔ มาแล้ว'}</button>`}
+              : `<button class="btn ${c.arrived ? 'btn-ghost' : 'btn-primary'}" data-checkin="${escapeHtml(c.id)}" ${busy ? 'disabled' : ''}>${busy ? 'กำลังบันทึก…' : (c.arrived ? '+ บันทึกเพิ่ม' : '✔ มาแล้ว')}</button>`}
           </article>`;
         }).join('') + (more > 0 ? `<div class="card empty">และอีก ${more} รายการ — พิมพ์ชื่อหรือ PEA No. เพื่อค้นหา</div>` : '');
       }
@@ -312,9 +313,11 @@
       async function run(action, c, extra, okMsg) {
         const s = session.get();
         if (!s) { showLogin(); return; }
+        // คิดรวมกับคนที่ลงทะเบียนเองไว้แล้ว (c.self) ให้ตัวเลขบนจอตรงกับที่เซิร์ฟเวอร์จะคำนวณ
+        const self = c.self || 0;
         const patch = action === 'checkin'
-          ? { arrived: true, count: extra.count, time: Date.now(), by: s.user.name }
-          : { arrived: false, count: 0, time: 0, by: '' };
+          ? { arrived: true, staff: true, count: self + extra.count, time: c.time || Date.now(), by: s.user.name }
+          : { arrived: self > 0, staff: false, count: self, time: self ? c.time : 0, by: self ? 'ลงทะเบียนเอง' : '' };
         state.writes++;
         state.pending.set(c.id, patch);
         state.busy.add(c.id);

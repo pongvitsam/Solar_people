@@ -6,12 +6,13 @@
  *   POST {action:'login', username}      → รับ token
  *   POST {action:'checkin', token, id, count}
  *   POST {action:'undo', token, id}
+ *   POST {action:'register', code, id, name, position, email, phone}  ผู้เข้างานลงทะเบียนเอง (ไม่ต้องล็อกอิน)
  *   POST {action:'users' | 'addUser' | 'updateUser' | 'deleteUser', token, ...}  (แอดมินเท่านั้น)
  *
  * ครั้งแรก: รันฟังก์ชัน setup() ใน editor หนึ่งครั้ง เพื่อสร้าง Google Sheet และอนุญาตสิทธิ์
  */
 
-const SHEET = { COMPANIES: 'Companies', USERS: 'Users', LOG: 'Log' };
+const SHEET = { COMPANIES: 'Companies', USERS: 'Users', LOG: 'Log', REG: 'Registrations' };
 
 const COMPANY_HEADERS = ['PEA No.', 'ชื่อบริษัท', 'เลขที่ มท.', 'ลงวันที่', 'สถานะ', 'จำนวนคน', 'เวลาเข้างาน', 'ผู้บันทึก'];
 const C = { ID: 0, NAME: 1, MT: 2, DATE: 3, STATUS: 4, COUNT: 5, TIME: 6, BY: 7 };
@@ -20,6 +21,12 @@ const USER_HEADERS = ['Username', 'ชื่อที่แสดง', 'Role', '
 const U = { USERNAME: 0, NAME: 1, ROLE: 2, ACTIVE: 3, CREATED: 4 };
 
 const LOG_HEADERS = ['เวลา', 'Action', 'CompanyID', 'ชื่อบริษัท', 'จำนวนคน', 'ผู้ทำรายการ'];
+
+/** ผู้เข้างานที่ลงทะเบียนเอง (1 แถว = 1 คน, เพิ่มต่อท้ายอย่างเดียว ไม่ต้องใช้ lock) */
+const REG_HEADERS = ['เวลา', 'PEA No.', 'ชื่อบริษัท', 'ชื่อ-สกุล', 'ตำแหน่ง', 'อีเมล', 'เบอร์โทร', 'ช่องทาง'];
+const R = { TIME: 0, ID: 1, COMPANY: 2, NAME: 3, POSITION: 4, EMAIL: 5, PHONE: 6, CHANNEL: 7 };
+const SELF_LABEL = 'ลงทะเบียนเอง';
+const TEST_CHANNELS = ['TEST', 'LOADTEST'];
 
 const STATUS_ARRIVED = 'มาแล้ว';
 const SESSION_TTL_SEC = 6 * 60 * 60; // 6 ชั่วโมง (สูงสุดของ CacheService)
@@ -82,6 +89,8 @@ function setup() {
   const log = ensureSheet_(ss, SHEET.LOG, LOG_HEADERS);
   log.getRange('A:A').setNumberFormat('dd/MM/yyyy HH:mm:ss');
 
+  regSheet_();
+
   // ลบแท็บว่างที่ Google สร้างให้อัตโนมัติ (เฉพาะกรณีว่างจริง ๆ)
   const defaultSheet = ss.getSheetByName('Sheet1') || ss.getSheetByName('ชีต1');
   if (defaultSheet && ss.getSheets().length > 1 && defaultSheet.getLastRow() === 0 && defaultSheet.getLastColumn() === 0) {
@@ -137,6 +146,10 @@ const ROUTES = {
   me: (p) => ({ user: auth_(p.token) }),
   checkin: (p) => compat_(p, checkin_(p)),
   undo: (p) => compat_(p, undo_(p)),
+  register: (p) => register_(p),
+  getEventCode: (p) => { auth_(p.token, true); return { code: eventCode_() }; },
+  setEventCode: (p) => setEventCode_(p),
+  clearTest: (p) => { auth_(p.token, true); return clearTestRegistrations(); },
   users: (p) => listUsers_(p),
   addUser: (p) => addUser_(p),
   updateUser: (p) => updateUser_(p),
@@ -210,24 +223,35 @@ function toCompany_(r) {
 /* ---------- Cache รายชื่อ (ลดการอ่าน Sheet) ----------
  * เก็บ JSON แบบย่อใน CacheService แบ่งเป็นชิ้น (ค่าละไม่เกิน 100KB)
  * - เช็คอิน/ยกเลิก: เขียนทับ cache ทันที (write-through)
- * - แก้ไขใน Sheet โดยตรง: เห็นผลภายใน LIST_TTL_SEC วินาที
+ * - ลงทะเบียนเอง / แก้ไขใน Sheet โดยตรง: เห็นผลภายใน LIST_TTL_SEC วินาที
  */
-const LIST_TTL_SEC = 30;
+const LIST_TTL_SEC = 5; // การลงทะเบียนเองไม่ล้าง cache ทุกครั้ง จึงเห็นผลภายใน ~5 วินาที
 const CHUNK = 90000;
 
-/** แปลงเป็นรูปแบบย่อ: c = [[id, name, mt, arrived(0/1), count, timeMs, by], ...] */
-function buildList_(values) {
+/**
+ * แปลงเป็นรูปแบบย่อ:
+ * c = [[id, name, mt, arrived(0/1), count, timeMs, by, staff(0/1), self], ...]
+ * - staff = เจ้าหน้าที่เช็คอินให้ (แท็บ Companies), self = จำนวนคนที่ลงทะเบียนเอง (แท็บ Registrations)
+ * - ไม่มีข้อมูลส่วนบุคคลของผู้ลงทะเบียนในผลลัพธ์
+ */
+function buildList_(values, agg) {
+  agg = agg || regAgg_();
   const rows = [];
   let arrived = 0, people = 0;
   values.forEach((r) => {
     const c = toCompany_(r);
     if (!c.id || !c.name) return; // ใช้เฉพาะแถวที่มีทั้ง PEA No. และชื่อบริษัท
-    if (c.arrived) { arrived++; people += c.count; }
-    rows.push([c.id, c.name, c.mt, c.arrived ? 1 : 0, c.count, c.time, c.by]);
+    const reg = agg.by[c.id] || { n: 0, first: 0 };
+    const isArrived = c.arrived || reg.n > 0;
+    const count = (c.arrived ? c.count : 0) + reg.n;
+    const times = [c.arrived ? c.time : 0, reg.first].filter(Boolean);
+    const by = c.arrived ? (reg.n ? `${c.by} + ${SELF_LABEL} ${reg.n}` : c.by) : (reg.n ? SELF_LABEL : '');
+    if (isArrived) { arrived++; people += count; }
+    rows.push([c.id, c.name, c.mt, isArrived ? 1 : 0, count, times.length ? Math.min(...times) : 0, by, c.arrived ? 1 : 0, reg.n]);
   });
   const json = JSON.stringify({
     c: rows,
-    s: { total: rows.length, arrived, remaining: rows.length - arrived, people },
+    s: { total: rows.length, arrived, remaining: rows.length - arrived, people, self: agg.total },
   });
   const v = Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, json, Utilities.Charset.UTF_8)).slice(0, 12);
   return { v, json };
@@ -263,7 +287,7 @@ function listCompanies_(clientV) {
     const json = hit.getJson();
     if (json) return { v: hit.v, d: JSON.parse(json) };
   }
-  const list = buildList_(readCompanies_().values);
+  const list = buildList_(readCompanies_().values, regAgg_());
   cacheList_(list);
   if (clientV && clientV === list.v) return { v: list.v, same: true };
   return { v: list.v, d: JSON.parse(list.json) };
@@ -334,6 +358,145 @@ function readUsers_() {
   const last = sh.getLastRow();
   const values = last < 2 ? [] : sh.getRange(2, 1, last - 1, USER_HEADERS.length).getValues();
   return { sh, values };
+}
+
+/* ------------------------------------------------------------------ */
+/* ผู้เข้างานลงทะเบียนเอง                                                */
+/* ------------------------------------------------------------------ */
+
+const PHONE_TTL_SEC = 6 * 60 * 60;
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
+/** แท็บ Registrations (สร้างให้อัตโนมัติถ้ายังไม่มี) */
+function regSheet_() {
+  const ss = ss_();
+  let sh = ss.getSheetByName(SHEET.REG);
+  if (sh) return sh;
+  const lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    sh = ss.getSheetByName(SHEET.REG) || ensureSheet_(ss, SHEET.REG, REG_HEADERS);
+    sh.getRange('A:A').setNumberFormat('dd/MM/yyyy HH:mm:ss');
+    sh.getRange('G:G').setNumberFormat('@');
+    return sh;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** เหลือแต่ตัวเลข และเติม 0 นำหน้าที่ Sheet อาจตัดทิ้ง (เช่น 812345678 → 0812345678) */
+function normPhone_(v) {
+  let d = String(v == null ? '' : v).replace(/\D/g, '');
+  if (d.startsWith('66') && d.length === 11) d = '0' + d.slice(2);
+  if (d.length === 9 && d[0] !== '0') d = '0' + d;
+  return d;
+}
+
+/** สรุปจำนวนคนที่ลงทะเบียนเองต่อบริษัท + เก็บรายการเบอร์ไว้กันซ้ำ */
+function regAgg_() {
+  const sh = ss_().getSheetByName(SHEET.REG);
+  const by = {};
+  const phones = [];
+  let total = 0;
+  if (sh && sh.getLastRow() >= 2) {
+    sh.getRange(2, 1, sh.getLastRow() - 1, REG_HEADERS.length).getValues().forEach((r) => {
+      const id = String(r[R.ID]).trim();
+      if (!id) return;
+      const t = r[R.TIME] instanceof Date ? r[R.TIME].getTime() : 0;
+      const a = by[id] || (by[id] = { n: 0, first: 0 });
+      a.n++;
+      total++;
+      if (t && (!a.first || t < a.first)) a.first = t;
+      const ph = normPhone_(r[R.PHONE]);
+      if (ph) phones.push(ph);
+    });
+  }
+  CacheService.getScriptCache().put('reg_phones', JSON.stringify(phones), 60);
+  return { by, phones, total };
+}
+
+function eventCode_() {
+  const props = PropertiesService.getScriptProperties();
+  let code = props.getProperty('EVENT_CODE');
+  if (!code) {
+    code = Utilities.getUuid().replace(/-/g, '').slice(0, 6).toUpperCase();
+    props.setProperty('EVENT_CODE', code);
+  }
+  return code;
+}
+
+function setEventCode_(p) {
+  auth_(p.token, true);
+  const code = String(p.code || '').trim().toUpperCase();
+  if (!/^[A-Z0-9]{4,20}$/.test(code)) throw new AppError('BAD_INPUT', 'รหัสงานใช้ A-Z และ 0-9 ความยาว 4–20 ตัว');
+  PropertiesService.getScriptProperties().setProperty('EVENT_CODE', code);
+  return { code };
+}
+
+function register_(p) {
+  const code = String(p.code || '').trim().toUpperCase();
+  if (!code || code !== eventCode_()) {
+    throw new AppError('BAD_CODE', 'รหัสงานไม่ถูกต้อง กรุณาสแกน QR Code ที่จุดลงทะเบียนหน้างาน');
+  }
+  const name = String(p.name || '').trim().replace(/\s+/g, ' ');
+  const position = String(p.position || '').trim().replace(/\s+/g, ' ');
+  const email = String(p.email || '').trim().toLowerCase();
+  const phone = normPhone_(p.phone);
+  if (name.length < 2 || name.length > 100) throw new AppError('BAD_INPUT', 'กรุณากรอกชื่อ-สกุล');
+  if (!position || position.length > 100) throw new AppError('BAD_INPUT', 'กรุณากรอกตำแหน่ง');
+  if (!EMAIL_RE.test(email) || email.length > 120) throw new AppError('BAD_INPUT', 'รูปแบบอีเมลไม่ถูกต้อง');
+  if (!/^0\d{8,9}$/.test(phone)) throw new AppError('BAD_INPUT', 'เบอร์โทรศัพท์ต้องเป็นตัวเลข 9–10 หลัก');
+
+  // ตรวจบริษัทจากรายชื่อที่ cache ไว้ (ไม่ต้องอ่าน Sheet ถ้า cache ยังอยู่)
+  const list = listCompanies_();
+  const row = list.d.c.find((x) => x[0] === String(p.id || '').trim());
+  if (!row) throw new AppError('NOT_FOUND', 'ไม่พบบริษัทนี้ในรายชื่อ กรุณาติดต่อโต๊ะลงทะเบียน');
+
+  // กันลงทะเบียนซ้ำด้วยเบอร์โทร
+  const cache = CacheService.getScriptCache();
+  const prev = cache.get('ph_' + phone);
+  if (prev) {
+    const x = JSON.parse(prev);
+    throw new AppError('DUPLICATE', `เบอร์นี้ลงทะเบียนแล้ว (${x.company}) หากต้องการแก้ไข กรุณาติดต่อโต๊ะลงทะเบียน`);
+  }
+  const phones = JSON.parse(cache.get('reg_phones') || 'null') || regAgg_().phones;
+  if (phones.indexOf(phone) >= 0) {
+    throw new AppError('DUPLICATE', 'เบอร์นี้ลงทะเบียนแล้ว หากต้องการแก้ไข กรุณาติดต่อโต๊ะลงทะเบียน');
+  }
+
+  const now = new Date();
+  const channel = TEST_CHANNELS.indexOf(p.channel) >= 0 ? p.channel : SELF_LABEL;
+  // ใส่ ' นำหน้าเบอร์ เพื่อให้ Sheet เก็บเป็นข้อความ (ไม่ตัด 0 ข้างหน้า)
+  regSheet_().appendRow([now, row[0], row[1], name, position, email, "'" + phone, channel]);
+  cache.put('ph_' + phone, JSON.stringify({ company: row[1], t: now.getTime() }), PHONE_TTL_SEC);
+  return { time: now.getTime(), company: row[1], id: row[0], name };
+}
+
+/** ลบข้อมูลทดสอบ (ช่องทาง TEST / LOADTEST) ออกจากแท็บ Registrations */
+function clearTestRegistrations() {
+  const sh = regSheet_();
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const last = sh.getLastRow();
+    if (last < 2) return { removed: 0, kept: 0 };
+    const values = sh.getRange(2, 1, last - 1, REG_HEADERS.length).getValues();
+    const isTest = (r) => TEST_CHANNELS.indexOf(String(r[R.CHANNEL])) >= 0;
+    const keep = values.filter((r) => !isTest(r));
+    const removedPhones = values.filter(isTest).map((r) => 'ph_' + normPhone_(r[R.PHONE]));
+    sh.getRange(2, 1, last - 1, REG_HEADERS.length).clearContent();
+    if (keep.length) {
+      keep.forEach((r) => { r[R.PHONE] = "'" + normPhone_(r[R.PHONE]); });
+      sh.getRange(2, 1, keep.length, REG_HEADERS.length).setValues(keep);
+    }
+    const cache = CacheService.getScriptCache();
+    if (removedPhones.length) cache.removeAll(removedPhones);
+    cache.remove('list_head');
+    cache.remove('reg_phones');
+    return { removed: values.length - keep.length, kept: keep.length };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 /* ---------- Cache รายชื่อผู้ใช้ ----------

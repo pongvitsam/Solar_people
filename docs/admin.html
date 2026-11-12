@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=6">
+  <link rel="stylesheet" href="styles.css?v=7">
 </head>
 <body>
   <header class="topbar">
@@ -25,6 +25,27 @@
     <div id="notice" class="notice" hidden></div>
 
     <div id="content" hidden>
+      <div class="section-title">
+        <h1>QR Code ลงทะเบียนผู้เข้างาน</h1>
+        <button class="btn btn-brand no-print" type="button" id="printQr">🖨 พิมพ์ QR</button>
+      </div>
+      <section class="card qr-row" id="qrCard">
+        <div class="qr-box" id="qr" aria-label="QR Code สำหรับลงทะเบียน"></div>
+        <div>
+          <h2 style="margin:0 0 4px;font-size:1.3rem">สแกนเพื่อลงทะเบียนเข้างาน</h2>
+          <p class="muted" style="margin:0 0 10px">ผู้เข้างานสแกนด้วยกล้องมือถือ เลือกบริษัท แล้วกรอกข้อมูล</p>
+          <p class="qr-link" id="qrLink"></p>
+          <form class="code-form no-print" id="codeForm" novalidate>
+            <div class="field">
+              <label for="codeInput">รหัสงาน (เปลี่ยนแล้ว QR เก่าจะใช้ไม่ได้)</label>
+              <input id="codeInput" maxlength="20" autocapitalize="characters" spellcheck="false">
+            </div>
+            <button class="btn btn-ghost" type="submit">บันทึกรหัส</button>
+          </form>
+        </div>
+      </section>
+
+      <div class="no-print">
       <div class="section-title">
         <h1>เพิ่มเจ้าหน้าที่</h1>
         <a class="btn btn-ghost" id="sheetLink" href="#" target="_blank" rel="noopener" hidden>เปิด Google Sheet ↗</a>
@@ -56,11 +77,13 @@
         </table>
       </div>
       <p style="color:var(--muted);font-size:.9rem;margin:12px 0 40px">ผู้ใช้ที่ถูกปิดหรือลบจะใช้งานต่อไม่ได้ทันที</p>
+      </div>
     </div>
   </main>
 
-  <script src="js/config.js?v=6"></script>
-  <script src="js/common.js?v=6"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script src="js/config.js?v=7"></script>
+  <script src="js/common.js?v=7"></script>
   <script>
     (function () {
       const { api, session, escapeHtml, toast } = window.App;
@@ -141,7 +164,40 @@
         }
       });
 
-      call('users', {});
+      /* ---------- รหัสงาน & QR ---------- */
+      let qr = null;
+      function showCode(code) {
+        const url = new URL('register.html?code=' + encodeURIComponent(code), location.href).toString();
+        $('codeInput').value = code;
+        $('qrLink').textContent = url;
+        $('qr').innerHTML = '';
+        if (window.QRCode) {
+          qr = new QRCode($('qr'), { text: url, width: 220, height: 220, correctLevel: QRCode.CorrectLevel.M });
+        } else {
+          $('qr').textContent = 'โหลดตัวสร้าง QR ไม่สำเร็จ';
+        }
+      }
+      async function loadCode() {
+        try {
+          const r = await api.post('getEventCode', { token: s.token });
+          showCode(r.code);
+        } catch (err) { toast(err.message, 'error'); }
+      }
+      $('codeForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const code = $('codeInput').value.trim().toUpperCase();
+        if (!/^[A-Z0-9]{4,20}$/.test(code)) { toast('รหัสงานใช้ A-Z และ 0-9 ความยาว 4–20 ตัว', 'error'); return; }
+        if (!confirm('เปลี่ยนรหัสงานเป็น ' + code + ' ?
+QR Code ที่พิมพ์ไว้ก่อนหน้าจะใช้ลงทะเบียนไม่ได้')) return;
+        try {
+          const r = await api.post('setEventCode', { token: s.token, code });
+          showCode(r.code);
+          toast('บันทึกรหัสงานแล้ว', 'ok');
+        } catch (err) { toast(err.message, 'error'); }
+      });
+      $('printQr').addEventListener('click', () => window.print());
+
+      call('users', {}).then((ok) => { if (ok) loadCode(); });
     })();
   </script>
 </body>
