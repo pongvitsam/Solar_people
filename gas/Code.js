@@ -13,6 +13,7 @@
  */
 
 const SHEET = { COMPANIES: 'Companies', USERS: 'Users', LOG: 'Log', REG: 'Registrations' };
+const BUILD = 'reg-lock-1'; // ใช้ตรวจว่า deployment ใหม่ใช้งานครบทุกเครื่องแล้ว (?action=ping)
 
 const COMPANY_HEADERS = ['PEA No.', 'ชื่อบริษัท', 'เลขที่ มท.', 'ลงวันที่', 'สถานะ', 'จำนวนคน', 'เวลาเข้างาน', 'ผู้บันทึก'];
 const C = { ID: 0, NAME: 1, MT: 2, DATE: 3, STATUS: 4, COUNT: 5, TIME: 6, BY: 7 };
@@ -147,9 +148,17 @@ const ROUTES = {
   checkin: (p) => compat_(p, checkin_(p)),
   undo: (p) => compat_(p, undo_(p)),
   register: (p) => register_(p),
+  ping: () => ({ build: BUILD }),
   getEventCode: (p) => { auth_(p.token, true); return { code: eventCode_() }; },
   setEventCode: (p) => setEventCode_(p),
-  clearTest: (p) => { auth_(p.token, true); return clearTestRegistrations(); },
+  clearTest: (p) => {
+    auth_(p.token, true);
+    // ล้าง cache กันซ้ำของเบอร์ทดสอบที่ระบุ (เผื่อแถวทดสอบหายไปจาก Sheet แล้ว)
+    if (Array.isArray(p.phones) && p.phones.length) {
+      CacheService.getScriptCache().removeAll(p.phones.slice(0, 1000).map((x) => 'ph_' + normPhone_(x)));
+    }
+    return clearTestRegistrations();
+  },
   users: (p) => listUsers_(p),
   addUser: (p) => addUser_(p),
   updateUser: (p) => updateUser_(p),
@@ -452,23 +461,33 @@ function register_(p) {
   const row = list.d.c.find((x) => x[0] === String(p.id || '').trim());
   if (!row) throw new AppError('NOT_FOUND', 'ไม่พบบริษัทนี้ในรายชื่อ กรุณาติดต่อโต๊ะลงทะเบียน');
 
-  // กันลงทะเบียนซ้ำด้วยเบอร์โทร
   const cache = CacheService.getScriptCache();
-  const prev = cache.get('ph_' + phone);
-  if (prev) {
-    const x = JSON.parse(prev);
-    throw new AppError('DUPLICATE', `เบอร์นี้ลงทะเบียนแล้ว (${x.company}) หากต้องการแก้ไข กรุณาติดต่อโต๊ะลงทะเบียน`);
-  }
+  const dupMsg = (company) => `เบอร์นี้ลงทะเบียนแล้ว${company ? ` (${company})` : ''} หากต้องการแก้ไข กรุณาติดต่อโต๊ะลงทะเบียน`;
+  // เช็คซ้ำรอบแรกนอก lock (ตอบเร็ว ไม่ต้องรอคิว)
+  if (cache.get('ph_' + phone)) throw new AppError('DUPLICATE', dupMsg(JSON.parse(cache.get('ph_' + phone) || '{}').company));
   const phones = JSON.parse(cache.get('reg_phones') || 'null') || regAgg_().phones;
-  if (phones.indexOf(phone) >= 0) {
-    throw new AppError('DUPLICATE', 'เบอร์นี้ลงทะเบียนแล้ว หากต้องการแก้ไข กรุณาติดต่อโต๊ะลงทะเบียน');
-  }
+  if (phones.indexOf(phone) >= 0) throw new AppError('DUPLICATE', dupMsg());
 
-  const now = new Date();
+  const sh = regSheet_();
   const channel = TEST_CHANNELS.indexOf(p.channel) >= 0 ? p.channel : SELF_LABEL;
-  // ใส่ ' นำหน้าเบอร์ เพื่อให้ Sheet เก็บเป็นข้อความ (ไม่ตัด 0 ข้างหน้า)
-  regSheet_().appendRow([now, row[0], row[1], name, position, email, "'" + phone, channel]);
-  cache.put('ph_' + phone, JSON.stringify({ company: row[1], t: now.getTime() }), PHONE_TTL_SEC);
+  // appendRow พร้อมกันหลาย request เขียนทับแถวเดียวกันได้ (ข้อมูลหาย — พบจาก load test)
+  // จึงล็อกเฉพาะช่วงเขียนแถว ซึ่งสั้นมาก (ไม่อ่านทั้งชีตเหมือนการเช็คอินของเจ้าหน้าที่)
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) {
+    throw new AppError('BUSY', 'ขณะนี้มีผู้ลงทะเบียนพร้อมกันจำนวนมาก กรุณากดลงทะเบียนอีกครั้ง');
+  }
+  let now;
+  try {
+    // เช็คซ้ำอีกครั้งภายใน lock กันกดส่งซ้ำพร้อมกัน
+    if (cache.get('ph_' + phone)) throw new AppError('DUPLICATE', dupMsg(JSON.parse(cache.get('ph_' + phone) || '{}').company));
+    now = new Date();
+    // ใส่ ' นำหน้าเบอร์ เพื่อให้ Sheet เก็บเป็นข้อความ (ไม่ตัด 0 ข้างหน้า)
+    sh.appendRow([now, row[0], row[1], name, position, email, "'" + phone, channel]);
+    SpreadsheetApp.flush();
+    cache.put('ph_' + phone, JSON.stringify({ company: row[1], t: now.getTime() }), PHONE_TTL_SEC);
+  } finally {
+    lock.releaseLock();
+  }
   return { time: now.getTime(), company: row[1], id: row[0], name };
 }
 

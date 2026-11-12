@@ -196,7 +196,19 @@
         btn.textContent = 'กำลังบันทึก…';
         $('formError').textContent = '';
         try {
-          const r = await api.post('register', { code, id: state.picked.id, name, position, email, phone });
+          const payload = { code, id: state.picked.id, name, position, email, phone };
+          let r;
+          // BUSY = คิวเต็ม ยังไม่ได้บันทึก จึงส่งซ้ำอัตโนมัติได้อย่างปลอดภัย (สูงสุด 3 ครั้ง)
+          for (let attempt = 1; ; attempt++) {
+            try {
+              r = await api.post('register', payload);
+              break;
+            } catch (err) {
+              if (err.code !== 'BUSY' || attempt >= 3) throw err;
+              btn.textContent = 'มีผู้ลงทะเบียนจำนวนมาก กำลังลองใหม่…';
+              await new Promise((ok) => setTimeout(ok, 1500 * attempt + Math.random() * 1000));
+            }
+          }
           try { localStorage.setItem(DONE_KEY, JSON.stringify(r)); } catch (err) { /* ignore */ }
           showDone(r);
         } catch (err) {
