@@ -208,7 +208,7 @@ th { font-size: .85rem; color: var(--muted); font-weight: 500; }
 
 .section-title { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 24px 0 12px; flex-wrap: wrap; }
 .section-title h1, .section-title h2 { margin: 0; font-size: 1.25rem; }
-.form-row { display: grid; grid-template-columns: 1fr 1fr 160px auto; gap: 10px; align-items: end; padding: 16px; }
+.form-row { display: grid; grid-template-columns: 1fr 1fr 1fr 150px auto; gap: 10px; align-items: end; padding: 16px; }
 .form-row .field { margin: 0; }
 
 /* ---------- Toast ---------- */

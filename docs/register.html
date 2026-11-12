@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=8">
+  <link rel="stylesheet" href="styles.css?v=9">
 </head>
 <body>
   <header class="topbar">
@@ -93,8 +93,8 @@
     </section>
   </main>
 
-  <script src="js/config.js?v=8"></script>
-  <script src="js/common.js?v=8"></script>
+  <script src="js/config.js?v=9"></script>
+  <script src="js/common.js?v=9"></script>
   <script>
     (function () {
       const { api, escapeHtml, matches, fmtClock, toast } = window.App;
@@ -118,8 +118,14 @@
         $('dTime').textContent = `${dateFmt.format(new Date(r.time))} ${fmtClock(new Date(r.time))} น.`;
         show('doneView');
       }
+      const DONE_MAX_AGE_MS = 12 * 60 * 60 * 1000;
+      // หน้าสำเร็จที่บันทึกไว้ใช้ได้เฉพาะรหัสงานเดียวกันและภายใน 12 ชม. (กันเครื่องที่เคยทดสอบไว้ค้างหน้าสำเร็จเก่า)
       function loadDone() {
-        try { return JSON.parse(localStorage.getItem(DONE_KEY) || 'null'); } catch (e) { return null; }
+        let d = null;
+        try { d = JSON.parse(localStorage.getItem(DONE_KEY) || 'null'); } catch (e) { d = null; }
+        if (d && d.code === code && Date.now() - (d.savedAt || 0) < DONE_MAX_AGE_MS) return d;
+        try { localStorage.removeItem(DONE_KEY); } catch (e) { /* ignore */ }
+        return null;
       }
 
       $('another').addEventListener('click', () => {
@@ -183,12 +189,12 @@
         const name = $('fName').value.trim();
         const position = $('fPosition').value.trim();
         const email = $('fEmail').value.trim();
-        const phone = $('fPhone').value.replace(/\D/g, '');
+        const phone = App.validate.phone($('fPhone').value);
         if (!state.picked) return fail('กรุณาเลือกบริษัท', q);
         if (name.length < 2) return fail('กรุณากรอกชื่อ-นามสกุล', $('fName'));
         if (!position) return fail('กรุณากรอกตำแหน่ง', $('fPosition'));
-        if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) return fail('รูปแบบอีเมลไม่ถูกต้อง', $('fEmail'));
-        if (!/^0\d{8,9}$/.test(phone)) return fail('เบอร์โทรศัพท์ต้องขึ้นต้นด้วย 0 และมี 9–10 หลัก', $('fPhone'));
+        if (!App.validate.email(email)) return fail(App.validate.EMAIL_MSG, $('fEmail'));
+        if (!phone) return fail(App.validate.PHONE_MSG, $('fPhone'));
         if (!$('fConsent').checked) return fail('กรุณาติ๊กยินยอมการเก็บข้อมูล', $('fConsent'));
 
         const btn = $('submitBtn');
@@ -196,20 +202,12 @@
         btn.textContent = 'กำลังบันทึก…';
         $('formError').textContent = '';
         try {
-          const payload = { code, id: state.picked.id, name, position, email, phone };
-          let r;
-          // BUSY = คิวเต็ม ยังไม่ได้บันทึก จึงส่งซ้ำอัตโนมัติได้อย่างปลอดภัย (สูงสุด 3 ครั้ง)
-          for (let attempt = 1; ; attempt++) {
-            try {
-              r = await api.post('register', payload);
-              break;
-            } catch (err) {
-              if (err.code !== 'BUSY' || attempt >= 3) throw err;
-              btn.textContent = 'มีผู้ลงทะเบียนจำนวนมาก กำลังลองใหม่…';
-              await new Promise((ok) => setTimeout(ok, 1500 * attempt + Math.random() * 1000));
-            }
-          }
-          try { localStorage.setItem(DONE_KEY, JSON.stringify(r)); } catch (err) { /* ignore */ }
+          // BUSY = คิวเต็ม ยังไม่ได้บันทึก จึงส่งซ้ำอัตโนมัติได้อย่างปลอดภัย
+          // ถ้าเน็ตหลุดหลังบันทึกแล้วกดส่งซ้ำ เซิร์ฟเวอร์จะตอบสำเร็จพร้อมเวลาเดิม (ไม่ขึ้นว่าเบอร์ซ้ำ)
+          const r = await App.postRetry('register', { code, id: state.picked.id, name, position, email, phone },
+            () => { btn.textContent = 'มีผู้ลงทะเบียนจำนวนมาก กำลังลองใหม่…'; });
+          const done = { time: r.time, company: r.company, id: r.id, name: r.name, code, savedAt: Date.now() };
+          try { localStorage.setItem(DONE_KEY, JSON.stringify(done)); } catch (err) { /* ignore */ }
           showDone(r);
         } catch (err) {
           if (err.code === 'BAD_CODE') { show('noCodeView'); return; }

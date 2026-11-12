@@ -13,13 +13,13 @@
  */
 
 const SHEET = { COMPANIES: 'Companies', USERS: 'Users', LOG: 'Log', REG: 'Registrations' };
-const BUILD = 'staff-person-1'; // ใช้ตรวจว่า deployment ใหม่ใช้งานครบทุกเครื่องแล้ว (?action=ping)
+const BUILD = 'review-fix-1'; // ใช้ตรวจว่า deployment ใหม่ใช้งานครบทุกเครื่องแล้ว (?action=ping)
 
 const COMPANY_HEADERS = ['PEA No.', 'ชื่อบริษัท', 'เลขที่ มท.', 'ลงวันที่', 'สถานะ', 'จำนวนคน', 'เวลาเข้างาน', 'ผู้บันทึก'];
 const C = { ID: 0, NAME: 1, MT: 2, DATE: 3, STATUS: 4, COUNT: 5, TIME: 6, BY: 7 };
 
-const USER_HEADERS = ['Username', 'ชื่อที่แสดง', 'Role', 'Active', 'สร้างเมื่อ'];
-const U = { USERNAME: 0, NAME: 1, ROLE: 2, ACTIVE: 3, CREATED: 4 };
+const USER_HEADERS = ['Username', 'ชื่อที่แสดง', 'Role', 'Active', 'สร้างเมื่อ', 'PasswordHash'];
+const U = { USERNAME: 0, NAME: 1, ROLE: 2, ACTIVE: 3, CREATED: 4, PASS: 5 };
 
 const LOG_HEADERS = ['เวลา', 'Action', 'CompanyID', 'ชื่อบริษัท', 'จำนวนคน', 'ผู้ทำรายการ'];
 
@@ -34,6 +34,10 @@ const TEST_CHANNELS = ['TEST', 'LOADTEST'];
 const STATUS_ARRIVED = 'มาแล้ว';
 const SESSION_TTL_SEC = 6 * 60 * 60; // 6 ชั่วโมง (สูงสุดของ CacheService)
 const USERNAME_RE = /^[A-Za-z0-9._-]{2,30}$/;
+const SESSION_GEN = 'pw-1'; // เปลี่ยนค่านี้เมื่อต้องการบังคับให้ทุกคนล็อกอินใหม่
+const PW_MIN = 6;
+const PW_ROUNDS = 200;
+const MAX_LOGIN_FAILS = 5; // ใส่รหัสผิดเกินนี้ภายใน 10 นาที จะถูกล็อกชั่วคราว
 
 /* ------------------------------------------------------------------ */
 /* Setup                                                              */
@@ -81,11 +85,10 @@ function setup() {
 
   const users = ensureSheet_(ss, SHEET.USERS, USER_HEADERS);
   if (users.getLastRow() < 2) {
-    const now = new Date();
-    users.getRange(2, 1, 2, USER_HEADERS.length).setValues([
-      ['admin', 'ผู้ดูแลระบบ', 'admin', true, now],
-      ['emd2', 'emd2', 'staff', true, now],
-    ]);
+    // สร้างแอดมินคนแรกด้วยชื่อสุ่ม (repo เป็นสาธารณะ จึงไม่ใส่ชื่อผู้ใช้ตายตัวในโค้ด)
+    const adminName = 'admin' + Utilities.getUuid().replace(/-/g, '').slice(0, 4);
+    users.getRange(2, 1, 1, USER_HEADERS.length).setValues([[adminName, 'ผู้ดูแลระบบ', 'admin', true, new Date(), '']]);
+    Logger.log('สร้างผู้ใช้แอดมิน: ' + adminName + ' — รัน initPasswords() เพื่อสร้างรหัสผ่าน');
   }
   users.getRange('D2:D').insertCheckboxes();
 
@@ -168,6 +171,7 @@ const ROUTES = {
   addUser: (p) => addUser_(p),
   updateUser: (p) => updateUser_(p),
   deleteUser: (p) => deleteUser_(p),
+  setPassword: (p) => setPassword_(p),
 };
 
 /**
@@ -195,7 +199,11 @@ function handle_(p) {
   } catch (err) {
     if (err instanceof AppError) return json_({ ok: false, code: err.code, error: err.message });
     console.error(err);
-    return json_({ ok: false, code: 'SERVER_ERROR', error: String(err && err.message || err) });
+    // ไม่ส่งข้อความภายในของ Apps Script (ภาษาอังกฤษ) ไปให้ผู้ใช้
+    if (/lock|timed? ?out|too many/i.test(String(err && err.message))) {
+      return json_({ ok: false, code: 'BUSY', error: 'ระบบมีผู้ใช้งานพร้อมกันจำนวนมาก กรุณาลองอีกครั้ง' });
+    }
+    return json_({ ok: false, code: 'SERVER_ERROR', error: 'ระบบขัดข้องชั่วคราว กรุณาลองอีกครั้ง' });
   }
 }
 
@@ -301,8 +309,11 @@ function listCompanies_(clientV) {
     const json = hit.getJson();
     if (json) return { v: hit.v, d: JSON.parse(json) };
   }
+  const cache = CacheService.getScriptCache();
+  const gen = cache.get('list_gen');
   const list = buildList_(readCompanies_().values, regAgg_());
-  cacheList_(list);
+  // ถ้าระหว่างอ่านมีการเขียนข้อมูล (gen เปลี่ยน) ข้อมูลชุดนี้อาจเก่ากว่า cache ที่เพิ่งเขียน จึงไม่เขียนทับ
+  if (cache.get('list_gen') === gen) cacheList_(list);
   if (clientV && clientV === list.v) return { v: list.v, same: true };
   return { v: list.v, d: JSON.parse(list.json) };
 }
@@ -315,21 +326,32 @@ function findCompanyRow_(values, id) {
   return i;
 }
 
-/** อ่าน-แก้-เขียน ภายใต้ lock แล้วอัปเดต cache จากข้อมูลในหน่วยความจำ (ไม่อ่าน Sheet ซ้ำ) */
+/** เปลี่ยน "รุ่น" ของ list cache ทุกครั้งที่มีการเขียน เพื่อให้การ rebuild ที่อ่านข้อมูลก่อนหน้านั้นไม่เขียน cache ทับ */
+function bumpListGen_() {
+  CacheService.getScriptCache().put('list_gen', Utilities.getUuid(), 3600);
+}
+
+/**
+ * อ่าน-แก้-เขียน ภายใต้ lock แล้วอัปเดต cache จากข้อมูลในหน่วยความจำ (ไม่อ่าน Sheet ซ้ำ)
+ * fn คืน { row: [สถานะ, จำนวน, เวลา, ผู้บันทึก], after: () => {...} } — after รันหลังเขียนสำเร็จ (เช่น บันทึก Log)
+ */
 function mutateCompany_(id, fn) {
   const lock = LockService.getScriptLock();
-  lock.waitLock(15000);
+  if (!lock.tryLock(15000)) throw new AppError('BUSY', 'ระบบมีผู้ใช้งานพร้อมกันจำนวนมาก กรุณาลองอีกครั้ง');
   try {
     const { sh, values } = readCompanies_();
     const i = findCompanyRow_(values, id);
-    const row = fn(toCompany_(values[i])); // [สถานะ, จำนวน, เวลา, ผู้บันทึก]
+    const res = fn(toCompany_(values[i]));
+    const row = res.row;
     sh.getRange(i + 2, C.STATUS + 1, 1, 4).setValues([row]);
     SpreadsheetApp.flush();
+    if (res.after) res.after();
     values[i][C.STATUS] = row[0];
     values[i][C.COUNT] = row[1];
     values[i][C.TIME] = row[2];
     values[i][C.BY] = row[3];
     const list = buildList_(values);
+    bumpListGen_();
     cacheList_(list);
     return { v: list.v, d: JSON.parse(list.json) };
   } finally {
@@ -345,8 +367,7 @@ function checkin_(p) {
     if (current.arrived) {
       throw new AppError('ALREADY', `"${current.name}" ลงทะเบียนไปแล้ว${current.by ? ' โดย ' + current.by : ''}`);
     }
-    log_('CHECKIN', current, count, user);
-    return [STATUS_ARRIVED, count, new Date(), user.name];
+    return { row: [STATUS_ARRIVED, count, new Date(), user.name], after: () => log_('CHECKIN', current, count, user) };
   });
 }
 
@@ -354,8 +375,7 @@ function undo_(p) {
   const user = auth_(p.token);
   return mutateCompany_(p.id, (current) => {
     if (!current.arrived) throw new AppError('NOT_ARRIVED', `"${current.name}" ยังไม่ได้ลงทะเบียน`);
-    log_('UNDO', current, current.count, user);
-    return ['', '', '', ''];
+    return { row: ['', '', '', ''], after: () => log_('UNDO', current, current.count, user) };
   });
 }
 
@@ -387,7 +407,7 @@ function regSheet_() {
   let sh = ss.getSheetByName(SHEET.REG);
   if (sh) return sh;
   const lock = LockService.getScriptLock();
-  lock.waitLock(15000);
+  if (!lock.tryLock(15000)) throw new AppError('BUSY', 'ระบบมีผู้ใช้งานพร้อมกันจำนวนมาก กรุณาลองอีกครั้ง');
   try {
     sh = ss.getSheetByName(SHEET.REG) || ensureSheet_(ss, SHEET.REG, REG_HEADERS);
     sh.getRange('A:A').setNumberFormat('dd/MM/yyyy HH:mm:ss');
@@ -396,6 +416,38 @@ function regSheet_() {
   } finally {
     lock.releaseLock();
   }
+}
+
+const REG_FORMATS = ['dd/MM/yyyy HH:mm:ss', '@', '@', '@', '@', '@', '@', '@'];
+
+/** เขียนแถวต่อท้าย Registrations โดยตั้งรูปแบบเป็นข้อความก่อน (เบอร์โทรไม่ถูกตัด 0 และไม่ต้องใส่ ' นำหน้า) — เรียกภายใน lock เท่านั้น */
+function appendRegRows_(sh, rows) {
+  const r = sh.getLastRow() + 1;
+  const need = r + rows.length - 1 - sh.getMaxRows();
+  if (need > 0) sh.insertRowsAfter(sh.getMaxRows(), Math.max(need, 200));
+  const range = sh.getRange(r, 1, rows.length, REG_HEADERS.length);
+  range.setNumberFormats(rows.map(() => REG_FORMATS));
+  range.setValues(rows);
+}
+
+/** ดัชนี PEA No. → ชื่อบริษัท (อ่านแค่ 2 คอลัมน์, cache 60 วินาที) */
+function companyIndex_() {
+  const cache = CacheService.getScriptCache();
+  const hit = cache.get('cidx');
+  if (hit) return JSON.parse(hit);
+  const sh = ss_().getSheetByName(SHEET.COMPANIES);
+  const last = sh.getLastRow();
+  const idx = {};
+  if (last >= 2) {
+    sh.getRange(2, 1, last - 1, 2).getValues().forEach((r) => {
+      const id = String(r[0]).trim();
+      const name = String(r[1]).trim();
+      if (id && name) idx[id] = name;
+    });
+  }
+  const json = JSON.stringify(idx);
+  if (Utilities.newBlob(json).getBytes().length < 95000) cache.put('cidx', json, 60);
+  return idx;
 }
 
 /** เหลือแต่ตัวเลข และเติม 0 นำหน้าที่ Sheet อาจตัดทิ้ง (เช่น 812345678 → 0812345678) */
@@ -461,9 +513,10 @@ function staffRegister_(p) {
   const user = auth_(p.token);
   const channel = TEST_CHANNELS.indexOf(p.channel) >= 0 ? p.channel : STAFF_CHANNEL_PREFIX + user.name;
   const r = addPerson_(p, { strict: false, channel });
+  bumpListGen_();
   CacheService.getScriptCache().remove('list_head'); // ให้หน้าเจ้าหน้าที่/แดชบอร์ดเห็นทันที
-  log_('ADD_PERSON', { id: r.id, name: r.company }, 1, user);
-  return Object.assign(r, companyPeople_(p, user));
+  if (!r.repeat) log_('ADD_PERSON', { id: r.id, name: r.company }, 1, user);
+  return r;
 }
 
 /**
@@ -481,15 +534,24 @@ function addPerson_(p, opt) {
   if (email.length > 120 || ((opt.strict || email) && !EMAIL_RE.test(email))) throw new AppError('BAD_INPUT', 'รูปแบบอีเมลไม่ถูกต้อง');
   if (!/^0\d{8,9}$/.test(phone)) throw new AppError('BAD_INPUT', 'เบอร์โทรศัพท์ต้องเป็นตัวเลข 9–10 หลัก');
 
-  // ตรวจบริษัทจากรายชื่อที่ cache ไว้ (ไม่ต้องอ่าน Sheet ถ้า cache ยังอยู่)
-  const list = listCompanies_();
-  const row = list.d.c.find((x) => x[0] === String(p.id || '').trim());
-  if (!row) throw new AppError('NOT_FOUND', 'ไม่พบบริษัทนี้ในรายชื่อ กรุณาติดต่อโต๊ะลงทะเบียน');
+  // ตรวจบริษัทจากดัชนีชื่อบริษัท (อ่านแค่ 2 คอลัมน์ และ cache ไว้)
+  const id = String(p.id || '').trim();
+  const companyName = companyIndex_()[id];
+  if (!companyName) throw new AppError('NOT_FOUND', 'ไม่พบบริษัทนี้ในรายชื่อ กรุณาติดต่อโต๊ะลงทะเบียน');
+  const row = [id, companyName];
 
   const cache = CacheService.getScriptCache();
   const dupMsg = (company) => `เบอร์นี้ลงทะเบียนแล้ว${company ? ` (${company})` : ''} หากต้องการแก้ไข กรุณาติดต่อโต๊ะลงทะเบียน`;
+  // ส่งซ้ำข้อมูลเดิม (เช่น เน็ตหลุดหลังบันทึกไปแล้ว) ตอบสำเร็จพร้อมเวลาเดิม แทนการบอกว่าซ้ำ
+  const checkDup = () => {
+    const prev = JSON.parse(cache.get('ph_' + phone) || 'null');
+    if (!prev) return null;
+    if (prev.id === id && prev.name === name) return { time: prev.t, company: companyName, id, name, repeat: true };
+    throw new AppError('DUPLICATE', dupMsg(prev.company));
+  };
   // เช็คซ้ำรอบแรกนอก lock (ตอบเร็ว ไม่ต้องรอคิว)
-  if (cache.get('ph_' + phone)) throw new AppError('DUPLICATE', dupMsg(JSON.parse(cache.get('ph_' + phone) || '{}').company));
+  const again = checkDup();
+  if (again) return again;
   const phones = JSON.parse(cache.get('reg_phones') || 'null') || regAgg_().phones;
   if (phones.indexOf(phone) >= 0) throw new AppError('DUPLICATE', dupMsg());
 
@@ -503,21 +565,21 @@ function addPerson_(p, opt) {
   let now;
   try {
     // เช็คซ้ำอีกครั้งภายใน lock กันกดส่งซ้ำพร้อมกัน
-    if (cache.get('ph_' + phone)) throw new AppError('DUPLICATE', dupMsg(JSON.parse(cache.get('ph_' + phone) || '{}').company));
+    const againInLock = checkDup();
+    if (againInLock) return againInLock;
     now = new Date();
-    // ใส่ ' นำหน้าเบอร์ เพื่อให้ Sheet เก็บเป็นข้อความ (ไม่ตัด 0 ข้างหน้า)
-    sh.appendRow([now, row[0], row[1], name, position, email, "'" + phone, opt.channel]);
+    appendRegRows_(sh, [[now, row[0], row[1], name, position, email, phone, opt.channel]]);
     SpreadsheetApp.flush();
-    cache.put('ph_' + phone, JSON.stringify({ company: row[1], t: now.getTime() }), PHONE_TTL_SEC);
+    cache.put('ph_' + phone, JSON.stringify({ company: row[1], id, name, t: now.getTime() }), PHONE_TTL_SEC);
   } finally {
     lock.releaseLock();
   }
-  return { time: now.getTime(), company: row[1], id: row[0], name };
+  return { time: now.getTime(), company: row[1], id: row[0], name, position, email, phone, channel: opt.channel };
 }
 
 /** รายชื่อผู้เข้างานของบริษัท (เฉพาะเจ้าหน้าที่ที่ล็อกอิน) */
-function companyPeople_(p, user) {
-  if (!user) auth_(p.token);
+function companyPeople_(p) {
+  auth_(p.token);
   const id = String(p.id || '').trim();
   const sh = ss_().getSheetByName(SHEET.REG);
   const people = [];
@@ -557,10 +619,10 @@ function removePerson_(p) {
   } finally {
     lock.releaseLock();
   }
-  const cache = CacheService.getScriptCache();
-  cache.removeAll(['ph_' + phone, 'list_head', 'reg_phones']);
+  bumpListGen_();
+  CacheService.getScriptCache().removeAll(['ph_' + phone, 'list_head', 'reg_phones']);
   log_('REMOVE_PERSON', { id, name: String(removed[R.COMPANY]) }, 1, user);
-  return companyPeople_(p, user);
+  return { removed: phone };
 }
 
 /** ลบข้อมูลทดสอบ (ช่องทาง TEST / LOADTEST) ออกจากแท็บ Registrations */
@@ -577,9 +639,12 @@ function clearTestRegistrations() {
     const removedPhones = values.filter(isTest).map((r) => 'ph_' + normPhone_(r[R.PHONE]));
     sh.getRange(2, 1, last - 1, REG_HEADERS.length).clearContent();
     if (keep.length) {
-      keep.forEach((r) => { r[R.PHONE] = "'" + normPhone_(r[R.PHONE]); });
-      sh.getRange(2, 1, keep.length, REG_HEADERS.length).setValues(keep);
+      keep.forEach((r) => { r[R.PHONE] = normPhone_(r[R.PHONE]); });
+      const range = sh.getRange(2, 1, keep.length, REG_HEADERS.length);
+      range.setNumberFormats(keep.map(() => REG_FORMATS));
+      range.setValues(keep);
     }
+    bumpListGen_();
     const cache = CacheService.getScriptCache();
     if (removedPhones.length) cache.removeAll(removedPhones);
     cache.remove('list_head');
@@ -599,7 +664,7 @@ function userValues_() {
   const cache = CacheService.getScriptCache();
   const hit = cache.get('users');
   if (hit) return JSON.parse(hit);
-  const values = readUsers_().values.map((r) => [r[U.USERNAME], r[U.NAME], r[U.ROLE], r[U.ACTIVE]]);
+  const values = readUsers_().values.map((r) => [r[U.USERNAME], r[U.NAME], r[U.ROLE], r[U.ACTIVE], '', String(r[U.PASS] || '')]);
   cache.put('users', JSON.stringify(values), USERS_TTL_SEC);
   return values;
 }
@@ -623,23 +688,94 @@ function findUser_(values, username) {
   return values.findIndex((r) => String(r[U.USERNAME]).trim().toLowerCase() === key);
 }
 
+function toHex_(bytes) {
+  return bytes.map((b) => ('0' + (b & 0xff).toString(16)).slice(-2)).join('');
+}
+
+/** เก็บรหัสผ่านแบบ salt$hash (SHA-256 วนซ้ำ) ไม่เก็บรหัสจริง */
+function hashPassword_(password, salt) {
+  salt = salt || Utilities.getUuid().replace(/-/g, '');
+  let h = salt + ':' + password;
+  for (let i = 0; i < PW_ROUNDS; i++) {
+    h = toHex_(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, h + password, Utilities.Charset.UTF_8));
+  }
+  return salt + '$' + h;
+}
+
+function checkPassword_(password, stored) {
+  if (!stored || stored.indexOf('$') < 0) return false;
+  return hashPassword_(password, stored.split('$')[0]) === stored;
+}
+
+function validPassword_(pw) {
+  pw = String(pw || '');
+  if (pw.length < PW_MIN || pw.length > 64) throw new AppError('BAD_INPUT', `รหัสผ่านต้องยาว ${PW_MIN}–64 ตัวอักษร`);
+  return pw;
+}
+
+function randomPassword_() {
+  const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+  const bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, Utilities.getUuid() + Date.now());
+  let out = '';
+  for (let i = 0; i < 10; i++) out += chars[(bytes[i] & 0xff) % chars.length];
+  return out;
+}
+
+/**
+ * รันใน Apps Script editor: สร้างรหัสผ่านสุ่มให้ทุกบัญชีที่ยังไม่มีรหัส แล้วแสดงใน Execution log
+ * (จดรหัสไว้แจกเจ้าหน้าที่ แอดมินเปลี่ยนรหัสภายหลังได้ที่หน้าจัดการผู้ใช้)
+ */
+function initPasswords() {
+  const { sh, values } = readUsers_();
+  sh.getRange(1, U.PASS + 1).setValue('PasswordHash').setFontWeight('bold').setBackground('#1f3b57').setFontColor('#ffffff');
+  const out = [];
+  values.forEach((r, i) => {
+    const username = String(r[U.USERNAME]).trim();
+    if (!username || String(r[U.PASS] || '')) return;
+    const pw = randomPassword_();
+    sh.getRange(i + 2, U.PASS + 1).setValue(hashPassword_(pw));
+    out.push(`${username}  →  ${pw}`);
+  });
+  sh.hideColumns(U.PASS + 1);
+  invalidateUsers_();
+  Logger.log(out.length ? 'รหัสผ่านใหม่ (จดไว้แล้วปิดหน้านี้):\n' + out.join('\n') : 'ทุกบัญชีมีรหัสผ่านแล้ว');
+}
+
 function login_(p) {
+  const username = String(p.username || '').trim();
+  const password = String(p.password || '');
+  const cache = CacheService.getScriptCache();
+  const failKey = 'lf_' + username.toLowerCase();
+  const fails = Number(cache.get(failKey) || 0);
+  if (fails >= MAX_LOGIN_FAILS) throw new AppError('LOCKED', 'ใส่รหัสผ่านผิดหลายครั้ง กรุณารอ 10 นาทีแล้วลองใหม่');
+
   const values = userValues_();
-  const i = findUser_(values, p.username);
-  if (i < 0 || !String(p.username || '').trim()) throw new AppError('LOGIN_FAILED', 'ไม่พบชื่อผู้ใช้นี้');
-  const user = toUser_(values[i]);
+  const i = username ? findUser_(values, username) : -1;
+  const user = i >= 0 ? toUser_(values[i]) : null;
+  const stored = i >= 0 ? String(values[i][U.PASS] || '') : '';
+  if (user && user.active && !stored) {
+    throw new AppError('NO_PASSWORD', 'บัญชีนี้ยังไม่ได้ตั้งรหัสผ่าน กรุณาติดต่อผู้ดูแลระบบ');
+  }
+  if (!user || !checkPassword_(password, stored)) {
+    cache.put(failKey, String(fails + 1), 600);
+    throw new AppError('LOGIN_FAILED', 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง');
+  }
   if (!user.active) throw new AppError('LOGIN_FAILED', 'ผู้ใช้นี้ถูกปิดการใช้งาน');
+  cache.remove(failKey);
   const token = Utilities.getUuid();
-  CacheService.getScriptCache().put('s_' + token, user.username, SESSION_TTL_SEC);
+  cache.put('s_' + token, JSON.stringify({ u: user.username, g: SESSION_GEN }), SESSION_TTL_SEC);
   return { token, user };
 }
 
-/** ตรวจ token และสถานะผู้ใช้ล่าสุดใน Sheet (ถ้าถูกปิด/ลบ จะใช้งานต่อไม่ได้ทันที) */
+/** ตรวจ token และสถานะผู้ใช้ล่าสุด (ถ้าถูกปิด/ลบ จะใช้งานต่อไม่ได้) */
 function auth_(token, needAdmin) {
-  const username = token && CacheService.getScriptCache().get('s_' + token);
-  if (!username) throw new AppError('SESSION_EXPIRED', 'เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่');
+  const raw = token && CacheService.getScriptCache().get('s_' + token);
+  let sess = null;
+  try { sess = raw ? JSON.parse(raw) : null; } catch (e) { sess = null; }
+  // session รุ่นก่อนมีรหัสผ่าน (เก็บเป็นชื่อผู้ใช้เปล่า ๆ) ใช้ไม่ได้แล้ว
+  if (!sess || sess.g !== SESSION_GEN) throw new AppError('SESSION_EXPIRED', 'เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่');
   const values = userValues_();
-  const i = findUser_(values, username);
+  const i = findUser_(values, sess.u);
   const user = i >= 0 ? toUser_(values[i]) : null;
   if (!user || !user.active) {
     CacheService.getScriptCache().remove('s_' + token);
@@ -649,11 +785,29 @@ function auth_(token, needAdmin) {
   return user;
 }
 
+/** แอดมินตั้ง/รีเซ็ตรหัสผ่านของผู้ใช้ */
+function setPassword_(p) {
+  auth_(p.token, true);
+  const pw = validPassword_(p.password);
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) throw new AppError('BUSY', 'ระบบไม่ว่าง กรุณาลองอีกครั้ง');
+  try {
+    const { sh, values } = readUsers_();
+    const i = findUser_(values, p.username);
+    if (i < 0) throw new AppError('NOT_FOUND', 'ไม่พบผู้ใช้');
+    sh.getRange(i + 2, U.PASS + 1).setValue(hashPassword_(pw));
+    invalidateUsers_();
+  } finally {
+    lock.releaseLock();
+  }
+  return listUsers_(p);
+}
+
 function listUsers_(p) {
   auth_(p.token, true);
   const { values } = readUsers_();
   return {
-    users: values.map(toUser_).filter((u) => u.username),
+    users: values.map((r) => Object.assign(toUser_(r), { hasPassword: !!String(r[U.PASS] || '') })).filter((u) => u.username),
     sheetUrl: ss_().getUrl(),
   };
 }
@@ -666,12 +820,13 @@ function addUser_(p) {
   if (!USERNAME_RE.test(username)) {
     throw new AppError('BAD_INPUT', 'Username ใช้ได้เฉพาะ a-z, 0-9, . _ - ความยาว 2–30 ตัว');
   }
+  const pwHash = hashPassword_(validPassword_(p.password));
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
     const { sh, values } = readUsers_();
     if (findUser_(values, username) >= 0) throw new AppError('DUPLICATE', 'มี Username นี้อยู่แล้ว');
-    sh.appendRow([username, name, role, true, new Date()]);
+    sh.appendRow([username, name, role, true, new Date(), pwHash]);
     sh.getRange(sh.getLastRow(), U.ACTIVE + 1).insertCheckboxes().check();
     invalidateUsers_();
   } finally {

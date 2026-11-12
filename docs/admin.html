@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=8">
+  <link rel="stylesheet" href="styles.css?v=9">
 </head>
 <body>
   <header class="topbar">
@@ -60,6 +60,10 @@
           <input id="nName" placeholder="เช่น สมชาย ใจดี">
         </div>
         <div class="field">
+          <label for="nPass">รหัสผ่าน (อย่างน้อย 6 ตัว)</label>
+          <input id="nPass" type="text" autocomplete="new-password" spellcheck="false" placeholder="ตั้งรหัสผ่าน">
+        </div>
+        <div class="field">
           <label for="nRole">สิทธิ์</label>
           <select id="nRole">
             <option value="staff">เจ้าหน้าที่</option>
@@ -82,8 +86,8 @@
   </main>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-  <script src="js/config.js?v=8"></script>
-  <script src="js/common.js?v=8"></script>
+  <script src="js/config.js?v=9"></script>
+  <script src="js/common.js?v=9"></script>
   <script>
     (function () {
       const { api, session, escapeHtml, toast } = window.App;
@@ -112,8 +116,9 @@
             <td><b>${un}</b>${self ? ' <small style="color:var(--muted)">(คุณ)</small>' : ''}</td>
             <td>${escapeHtml(u.name)}</td>
             <td><span class="role ${u.role}">${u.role === 'admin' ? 'ผู้ดูแลระบบ' : 'เจ้าหน้าที่'}</span></td>
-            <td>${u.active ? 'ใช้งาน' : 'ปิดใช้งาน'}</td>
+            <td>${u.active ? 'ใช้งาน' : 'ปิดใช้งาน'}${u.hasPassword ? '' : ' <span class="role admin">ยังไม่มีรหัสผ่าน</span>'}</td>
             <td style="text-align:right">
+              <button class="btn btn-ghost" data-act="password" data-u="${un}">ตั้งรหัสผ่าน</button>
               ${self ? '' : `
                 <button class="btn btn-ghost" data-act="role" data-u="${un}" data-v="${u.role === 'admin' ? 'staff' : 'admin'}">${u.role === 'admin' ? 'ลดเป็นเจ้าหน้าที่' : 'ตั้งเป็นแอดมิน'}</button>
                 <button class="btn btn-ghost" data-act="active" data-u="${un}" data-v="${u.active ? '0' : '1'}">${u.active ? 'ปิดใช้งาน' : 'เปิดใช้งาน'}</button>
@@ -144,9 +149,11 @@
           $('nUser').focus();
           return;
         }
+        const password = $('nPass').value;
+        if (password.length < 6) { toast('รหัสผ่านต้องยาวอย่างน้อย 6 ตัวอักษร', 'error'); $('nPass').focus(); return; }
         const btn = e.submitter;
         if (btn) btn.disabled = true;
-        const ok = await call('addUser', { username, name: $('nName').value.trim(), role: $('nRole').value }, `เพิ่มผู้ใช้ ${username} แล้ว`);
+        const ok = await call('addUser', { username, password, name: $('nName').value.trim(), role: $('nRole').value }, `เพิ่มผู้ใช้ ${username} แล้ว`);
         if (btn) btn.disabled = false;
         if (ok) { $('addForm').reset(); $('nUser').focus(); }
       });
@@ -161,6 +168,11 @@
           call('updateUser', { username, active: b.dataset.v === '1' }, 'บันทึกแล้ว');
         } else if (b.dataset.act === 'role') {
           call('updateUser', { username, role: b.dataset.v }, 'บันทึกแล้ว');
+        } else if (b.dataset.act === 'password') {
+          const password = prompt(`ตั้งรหัสผ่านใหม่ให้ "${username}" (อย่างน้อย 6 ตัวอักษร)`);
+          if (password == null) return;
+          if (password.length < 6) { toast('รหัสผ่านต้องยาวอย่างน้อย 6 ตัวอักษร', 'error'); return; }
+          call('setPassword', { username, password }, `ตั้งรหัสผ่านให้ ${username} แล้ว`);
         }
       });
 

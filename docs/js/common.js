@@ -205,5 +205,32 @@
     },
   };
 
-  window.App = { cfg, api, session, list, summarize, ApiError, escapeHtml, matches, fmtTime, fmtClock, toast, poll };
+  /* ---------- ตรวจข้อมูลผู้เข้างาน (ใช้ร่วมกันทุกหน้า ให้ตรงกับฝั่งเซิร์ฟเวอร์ใน gas/Code.js) ---------- */
+  const validate = {
+    PHONE_MSG: 'เบอร์โทรศัพท์ต้องขึ้นต้นด้วย 0 และมี 9–10 หลัก',
+    EMAIL_MSG: 'รูปแบบอีเมลไม่ถูกต้อง',
+    /** คืนเบอร์ที่เหลือแต่ตัวเลข หรือ null ถ้าไม่ถูกต้อง */
+    phone(v) {
+      const d = String(v || '').replace(/\D/g, '');
+      return /^0\d{8,9}$/.test(d) ? d : null;
+    },
+    email(v) {
+      return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(v || '').trim());
+    },
+  };
+
+  /** ส่งซ้ำอัตโนมัติเมื่อเซิร์ฟเวอร์ตอบ BUSY (ยังไม่ได้บันทึก จึงปลอดภัย) */
+  async function postRetry(action, payload, onRetry, tries = 3) {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await api.post(action, payload);
+      } catch (err) {
+        if (err.code !== 'BUSY' || attempt >= tries) throw err;
+        if (onRetry) onRetry(attempt);
+        await new Promise((ok) => setTimeout(ok, 1500 * attempt + Math.random() * 1000));
+      }
+    }
+  }
+
+  window.App = { cfg, api, session, list, summarize, validate, postRetry, ApiError, escapeHtml, matches, fmtTime, fmtClock, toast, poll };
 })();

@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=8">
+  <link rel="stylesheet" href="styles.css?v=9">
 </head>
 <body>
   <header class="topbar">
@@ -30,6 +30,10 @@
       <div class="field">
         <label for="username">ชื่อผู้ใช้ (Username)</label>
         <input id="username" name="username" autocomplete="username" autocapitalize="off" spellcheck="false" required>
+      </div>
+      <div class="field">
+        <label for="password">รหัสผ่าน</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required>
       </div>
       <p class="error-text" id="loginError" role="alert"></p>
       <button class="btn btn-brand" style="width:100%" type="submit">เข้าสู่ระบบ</button>
@@ -124,8 +128,8 @@
     </form>
   </dialog>
 
-  <script src="js/config.js?v=8"></script>
-  <script src="js/common.js?v=8"></script>
+  <script src="js/config.js?v=9"></script>
+  <script src="js/common.js?v=9"></script>
   <script>
     (function () {
       const { api, cfg, session, escapeHtml, matches, fmtTime, fmtClock, toast, poll } = window.App;
@@ -160,12 +164,14 @@
       $('loginForm').addEventListener('submit', async (e) => {
         e.preventDefault();
         const username = $('username').value.trim();
-        if (!username) { $('loginError').textContent = 'กรุณากรอกชื่อผู้ใช้'; return; }
+        const password = $('password').value;
+        if (!username || !password) { $('loginError').textContent = 'กรุณากรอกชื่อผู้ใช้และรหัสผ่าน'; return; }
         const btn = e.submitter || $('loginForm').querySelector('button');
         btn.disabled = true;
         $('loginError').textContent = '';
         try {
-          const s = await api.post('login', { username });
+          const s = await api.post('login', { username, password });
+          $('password').value = '';
           session.set(s);
           showApp(s);
         } catch (err) {
@@ -360,21 +366,23 @@
         const s = session.get();
         if (!s) { showLogin(); return; }
         const name = $('pName').value.trim();
-        const phone = $('pPhone').value.replace(/\D/g, '');
+        const phone = App.validate.phone($('pPhone').value);
         const email = $('pEmail').value.trim();
         if (name.length < 2) { $('pplError').textContent = 'กรุณากรอกชื่อ-นามสกุล'; $('pName').focus(); return; }
-        if (!/^0\d{8,9}$/.test(phone)) { $('pplError').textContent = 'เบอร์โทรศัพท์ต้องขึ้นต้นด้วย 0 และมี 9–10 หลัก'; $('pPhone').focus(); return; }
-        if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) { $('pplError').textContent = 'รูปแบบอีเมลไม่ถูกต้อง'; $('pEmail').focus(); return; }
+        if (!phone) { $('pplError').textContent = App.validate.PHONE_MSG; $('pPhone').focus(); return; }
+        if (email && !App.validate.email(email)) { $('pplError').textContent = App.validate.EMAIL_MSG; $('pEmail').focus(); return; }
         const btn = $('pplAdd');
         btn.disabled = true;
         btn.textContent = 'กำลังบันทึก…';
         $('pplError').textContent = '';
         const c = people.company;
         try {
-          const r = await api.post('staffRegister', { token: s.token, id: c.id, name, phone, email, position: $('pPosition').value.trim() });
-          people.list = r.people;
+          const r = await App.postRetry('staffRegister', { token: s.token, id: c.id, name, phone, email, position: $('pPosition').value.trim() });
+          if (!people.list.some((x) => x.phone === r.phone)) {
+            people.list = people.list.concat([{ name: r.name, position: r.position, email: r.email, phone: r.phone, channel: r.channel, time: r.time }]);
+          }
           renderPeople();
-          syncCompanyCount(c.id, r.people.length);
+          syncCompanyCount(c.id, people.list.length);
           $('pplForm').reset();
           $('pName').focus();
           toast(`✔ เพิ่ม ${r.name} เวลา ${fmtClock(new Date(r.time))} น.`, 'ok');
@@ -394,10 +402,10 @@
         const s = session.get();
         b.disabled = true;
         try {
-          const r = await api.post('removePerson', { token: s.token, id: people.company.id, phone: person.phone });
-          people.list = r.people;
+          await App.postRetry('removePerson', { token: s.token, id: people.company.id, phone: person.phone });
+          people.list = people.list.filter((x) => x.phone !== person.phone);
           renderPeople();
-          syncCompanyCount(people.company.id, r.people.length);
+          syncCompanyCount(people.company.id, people.list.length);
           toast(`ลบ ${person.name} แล้ว`, 'ok');
         } catch (err) {
           b.disabled = false;
@@ -462,7 +470,7 @@
         applyPending();
         render();
         try {
-          const r = await api.post(action, Object.assign({ token: s.token, id: c.id, f: 2 }, extra));
+          const r = await App.postRetry(action, Object.assign({ token: s.token, id: c.id, f: 2 }, extra));
           state.pending.delete(c.id);
           state.busy.delete(c.id);
           App.list.accept(r);
