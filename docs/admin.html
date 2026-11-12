@@ -56,6 +56,15 @@
 
       <div class="no-print">
       <div class="section-title">
+        <h1>ส่งออกรายชื่อผู้เข้างาน</h1>
+        <span class="export-btns" style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-brand" type="button" id="expXlsx">⬇ Excel (.xlsx)</button>
+          <button class="btn btn-ghost" type="button" id="expPdf">⬇ PDF</button>
+        </span>
+      </div>
+      <p class="muted" style="margin:-4px 0 18px" id="expInfo">รายชื่อผู้เข้างานทั้งหมด (ไม่รวมข้อมูลทดสอบ) เรียงตามบริษัท</p>
+
+      <div class="section-title">
         <h1>เพิ่มเจ้าหน้าที่</h1>
         <a class="btn btn-ghost" id="sheetLink" href="#" target="_blank" rel="noopener" hidden>เปิด Google Sheet ↗</a>
       </div>
@@ -95,6 +104,7 @@
   </main>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <script src="js/config.js?v=12"></script>
   <script src="js/common.js?v=12"></script>
   <script>
@@ -239,6 +249,72 @@
         } catch (err) { toast(err.message, 'error'); }
       });
       $('printQr').addEventListener('click', () => window.print());
+
+      /* ---------- ส่งออกรายชื่อ Excel / PDF ---------- */
+      const EXP_HEAD = ['ลำดับ', 'บริษัท', 'PEA No.', 'ชื่อ-นามสกุล', 'ตำแหน่ง', 'อีเมล', 'เบอร์โทร', 'ช่องทาง', 'เวลาลงทะเบียน'];
+      const expFmt = new Intl.DateTimeFormat('th-TH', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Bangkok' });
+      const stamp = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Bangkok' });
+
+      async function loadExport() {
+        const r = await api.post('exportPeople', { token: s.token });
+        const rows = r.people.slice().sort((a, b) => a.company.localeCompare(b.company, 'th') || a.time - b.time);
+        return rows.map((p, i) => [
+          i + 1, p.company, p.id.indexOf('X-') === 0 ? 'นอกรายชื่อ' : p.id, p.name, p.position, p.email, p.phone, p.channel,
+          p.time ? expFmt.format(new Date(p.time)) : '',
+        ]);
+      }
+      async function runExport(btn, fn) {
+        const label = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'กำลังเตรียมข้อมูล…';
+        try {
+          const rows = await loadExport();
+          if (!rows.length) { toast('ยังไม่มีรายชื่อผู้เข้างาน', 'error'); return; }
+          fn(rows);
+        } catch (err) {
+          if (err.code === 'SESSION_EXPIRED') { session.clear(); fail(err.message, true); }
+          else toast(err.message || 'ส่งออกไม่สำเร็จ', 'error');
+        } finally {
+          btn.disabled = false;
+          btn.textContent = label;
+        }
+      }
+
+      $('expXlsx').addEventListener('click', (e) => runExport(e.currentTarget, (rows) => {
+        if (!window.XLSX) { toast('โหลดตัวสร้างไฟล์ Excel ไม่สำเร็จ ลองรีเฟรชหน้า', 'error'); return; }
+        const ws = XLSX.utils.aoa_to_sheet([EXP_HEAD].concat(rows)); // ค่าทุกช่องเป็นข้อความ/ตัวเลข ไม่ถูกตีเป็นสูตร
+        ws['!cols'] = [6, 38, 12, 26, 22, 28, 14, 20, 22].map((w) => ({ wch: w }));
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, 'ผู้เข้างาน');
+        XLSX.writeFile(wb, `รายชื่อผู้เข้างาน_${stamp()}.xlsx`);
+        toast(`ส่งออก Excel ${rows.length} รายการแล้ว`, 'ok');
+      }));
+
+      // PDF: เปิดหน้าสำหรับพิมพ์ แล้วให้เลือก "บันทึกเป็น PDF" (ฟอนต์ไทยแสดงถูกต้องโดยเบราว์เซอร์)
+      $('expPdf').addEventListener('click', (e) => runExport(e.currentTarget, (rows) => {
+        const w = window.open('', '_blank');
+        if (!w) { toast('เบราว์เซอร์บล็อกหน้าต่างใหม่ กรุณาอนุญาต pop-up แล้วลองอีกครั้ง', 'error'); return; }
+        const head = EXP_HEAD.map((h) => `<th>${escapeHtml(h)}</th>`).join('');
+        const body = rows.map((r) => `<tr>${r.map((c) => `<td>${escapeHtml(c)}</td>`).join('')}</tr>`).join('');
+        w.document.open();
+        w.document.write(`<!doctype html><html lang="th"><head><meta charset="utf-8"><title>รายชื่อผู้เข้างาน ${stamp()}</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;600&display=swap" rel="stylesheet">
+<style>
+@page { size: A4 landscape; margin: 10mm; }
+body { font-family: 'IBM Plex Sans Thai', sans-serif; font-size: 10px; color: #111; margin: 0; }
+h1 { font-size: 15px; margin: 0 0 2px; } p { margin: 0 0 8px; color: #555; }
+table { border-collapse: collapse; width: 100%; }
+th, td { border: 1px solid #999; padding: 3px 5px; text-align: left; vertical-align: top; word-break: break-word; }
+th { background: #eee; } thead { display: table-header-group; } tr { break-inside: avoid; }
+</style></head><body>
+<h1>รายชื่อผู้เข้างาน · โซลาร์ภาคประชาชน</h1>
+<p>ทั้งหมด ${rows.length} คน · ส่งออกเมื่อ ${escapeHtml(expFmt.format(new Date()))}</p>
+<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>
+</body></html>`);
+        w.document.close();
+        const go = () => { w.focus(); w.print(); };
+        if (w.document.fonts && w.document.fonts.ready) w.document.fonts.ready.then(() => setTimeout(go, 300)); else setTimeout(go, 1000);
+      }));
 
       call('users', {}).then((ok) => { if (ok) loadCode(); });
     })();

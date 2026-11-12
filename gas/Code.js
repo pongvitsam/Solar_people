@@ -170,6 +170,7 @@ const ROUTES = {
   register: (p) => register_(p),
   staffRegister: (p) => staffRegister_(p),
   companyPeople: (p) => companyPeople_(p),
+  exportPeople: (p) => exportPeople_(p),
   removePerson: (p) => removePerson_(p),
   ping: () => ({ build: BUILD }),
   getEventCode: (p) => { auth_(p.token, true); return { code: eventCode_() }; },
@@ -652,6 +653,29 @@ function companyPeople_(p) {
         phone: normPhone_(r[R.PHONE]),
         channel: String(r[R.CHANNEL]),
         time: r[R.TIME] instanceof Date ? r[R.TIME].getTime() : 0,
+      });
+    });
+  }
+  return { people };
+}
+
+/** รายชื่อผู้เข้างานทั้งหมด สำหรับส่งออก Excel/PDF (เฉพาะแอดมิน ไม่รวมข้อมูลทดสอบ) */
+function exportPeople_(p) {
+  auth_(p.token, true);
+  const sh = ss_().getSheetByName(SHEET.REG);
+  const people = [];
+  if (sh && sh.getLastRow() >= 2) {
+    sh.getRange(2, 1, sh.getLastRow() - 1, REG_HEADERS.length).getValues().forEach((r) => {
+      if (!String(r[R.NAME]).trim() || TEST_CHANNELS.indexOf(String(r[R.CHANNEL])) >= 0) return;
+      people.push({
+        time: r[R.TIME] instanceof Date ? r[R.TIME].getTime() : 0,
+        id: String(r[R.ID]).trim(),
+        company: String(r[R.COMPANY]).trim(),
+        name: String(r[R.NAME]).trim(),
+        position: String(r[R.POSITION]).trim(),
+        email: String(r[R.EMAIL]).trim(),
+        phone: normPhone_(r[R.PHONE]),
+        channel: String(r[R.CHANNEL]).trim(),
       });
     });
   }
