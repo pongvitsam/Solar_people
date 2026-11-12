@@ -179,6 +179,7 @@
         $('who').textContent = '👤 ' + s.user.name;
         $('logout').hidden = false;
         $('adminLink').hidden = s.user.role !== 'admin';
+        render(); // วาดจาก snapshot ทันที (ถ้าข้อมูลไม่เปลี่ยน load() จะไม่วาดซ้ำ)
         if (!state.poller) state.poller = poll(load, cfg.REFRESH_MS);
         else state.poller.now();
         $('q').focus();
