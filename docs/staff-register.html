@@ -17,7 +17,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=14">
+  <link rel="stylesheet" href="styles.css?v=15">
 </head>
 <body>
   <header class="topbar">
@@ -47,7 +47,7 @@
             <button class="clear" type="button" aria-label="ล้างคำค้นหา">✕</button>
           </label>
           <div id="results" class="results" role="listbox" aria-label="ผลการค้นหาบริษัท"></div>
-          <button class="btn btn-ghost btn-block offlist-link" type="button" id="useOfflist">ไม่พบบริษัทในรายชื่อ → กรอกชื่อบริษัทเอง</button>
+          <button class="btn btn-block offlist-link" type="button" id="useOfflist"><span class="plus" aria-hidden="true">+</span><span class="ol-txt">ไม่พบบริษัทในรายชื่อ<small>กดที่นี่เพื่อกรอกชื่อบริษัทเอง</small></span></button>
         </div>
         <div id="offlistBox" hidden>
           <div class="field">
