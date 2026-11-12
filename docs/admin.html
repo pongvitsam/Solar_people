@@ -165,14 +165,37 @@
       });
 
       /* ---------- รหัสงาน & QR ---------- */
-      let qr = null;
+      const QR_SIZE = 280;
+      const LOGO_RATIO = 0.24; // ขนาดตราสัญลักษณ์เทียบกับความกว้าง QR (ระดับ H กู้ข้อมูลที่ถูกบังได้ ~30%)
+
+      // วาดตรา กฟภ. ลงกลาง QR บน canvas โดยตรง (พิมพ์/บันทึกรูปแล้วตราติดไปด้วย)
+      function addLogo() {
+        const canvas = $('qr').querySelector('canvas');
+        const img = $('qr').querySelector('img');
+        if (!canvas) return;
+        const logo = new Image();
+        logo.onload = () => {
+          const ctx = canvas.getContext('2d');
+          const s = Math.round(canvas.width * LOGO_RATIO);
+          const c = canvas.width / 2;
+          ctx.fillStyle = '#ffffff';
+          ctx.beginPath();
+          ctx.arc(c, c, s / 2 + 5, 0, Math.PI * 2); // ขอบขาวรอบตรา ให้แยกจากจุด QR
+          ctx.fill();
+          ctx.drawImage(logo, c - s / 2, c - s / 2, s, s);
+          if (img) { img.src = canvas.toDataURL('image/png'); img.style.display = 'block'; canvas.style.display = 'none'; }
+        };
+        logo.src = 'img/pea-emblem.png';
+      }
+
       function showCode(code) {
         const url = new URL('register.html?code=' + encodeURIComponent(code), location.href).toString();
         $('codeInput').value = code;
         $('qrLink').textContent = url;
         $('qr').innerHTML = '';
         if (window.QRCode) {
-          qr = new QRCode($('qr'), { text: url, width: 220, height: 220, correctLevel: QRCode.CorrectLevel.M });
+          new QRCode($('qr'), { text: url, width: QR_SIZE, height: QR_SIZE, correctLevel: QRCode.CorrectLevel.H });
+          addLogo();
         } else {
           $('qr').textContent = 'โหลดตัวสร้าง QR ไม่สำเร็จ';
         }
