@@ -1,0 +1,26 @@
+{
+  "name": "ลงทะเบียนเข้างาน โซลาร์ภาคประชาชน — กฟภ.",
+  "short_name": "ลงทะเบียน กฟภ.",
+  "description": "ระบบลงทะเบียนเข้างานโซลาร์ภาคประชาชน การไฟฟ้าส่วนภูมิภาค",
+  "id": "./checkin.html",
+  "start_url": "./checkin.html?source=pwa",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "any",
+  "lang": "th",
+  "dir": "ltr",
+  "theme_color": "#74065f",
+  "background_color": "#f4f6f8",
+  "categories": ["business", "productivity"],
+  "icons": [
+    { "src": "img/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "img/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "img/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "ลงทะเบียน (เจ้าหน้าที่)", "short_name": "ลงทะเบียน", "url": "./checkin.html?source=shortcut", "icons": [{ "src": "img/icon-192.png", "sizes": "192x192" }] },
+    { "name": "แดชบอร์ด", "short_name": "แดชบอร์ด", "url": "./index.html?source=shortcut", "icons": [{ "src": "img/icon-192.png", "sizes": "192x192" }] },
+    { "name": "จัดการผู้ใช้ / QR Code", "short_name": "จัดการ", "url": "./admin.html?source=shortcut", "icons": [{ "src": "img/icon-192.png", "sizes": "192x192" }] }
+  ]
+}

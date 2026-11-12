@@ -232,5 +232,28 @@
     }
   }
 
+  /* ---------- PWA: ติดตั้งเป็นแอป + แจ้งสถานะออฟไลน์ ---------- */
+  if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('sw.js').catch(() => { /* ไม่มี SW ก็ใช้งานได้ตามปกติ */ });
+    });
+  }
+
+  function updateOnline() {
+    let bar = document.querySelector('.offline-bar');
+    if (navigator.onLine) { if (bar) bar.hidden = true; return; }
+    if (!bar) {
+      bar = document.createElement('div');
+      bar.className = 'offline-bar';
+      bar.setAttribute('role', 'status');
+      bar.textContent = '⚠ ออฟไลน์ — แสดงข้อมูลล่าสุดที่โหลดไว้ การบันทึกจะทำได้เมื่อกลับมาออนไลน์';
+      document.body.prepend(bar);
+    }
+    bar.hidden = false;
+  }
+  window.addEventListener('online', () => { updateOnline(); toast('กลับมาออนไลน์แล้ว', 'ok'); });
+  window.addEventListener('offline', updateOnline);
+  document.addEventListener('DOMContentLoaded', updateOnline);
+
   window.App = { cfg, api, session, list, summarize, validate, postRetry, ApiError, escapeHtml, matches, fmtTime, fmtClock, toast, poll };
 })();

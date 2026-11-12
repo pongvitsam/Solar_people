@@ -306,3 +306,43 @@ dialog.people-dialog { width: min(640px, calc(100vw - 24px)); }
   .item-actions { width: 100%; }
   .item-actions .btn { flex: 1; }
 }
+
+/* ---------- หลายอุปกรณ์ / PWA ---------- */
+/* iPhone/iPad ที่มีรอยบาก เมื่อเปิดแบบแอป (standalone) */
+.topbar { padding-top: env(safe-area-inset-top); }
+.topbar .wrap, main.wrap { padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); }
+body { padding-bottom: env(safe-area-inset-bottom); }
+.toasts { bottom: max(16px, env(safe-area-inset-bottom)); }
+
+.offline-bar {
+  position: sticky; top: 0; z-index: 30; padding: 8px 16px; text-align: center; font-size: .9rem;
+  background: var(--accent); color: #1a1200; font-weight: 600;
+}
+
+/* ปุ่ม/ช่องกรอกแตะง่ายบนจอสัมผัส */
+@media (pointer: coarse) {
+  .btn, .chip, .search input, .field input, .field select { min-height: 44px; }
+}
+
+/* แท็บเล็ตแนวนอน: แสดงรายการเช็คอินเป็น 2 คอลัมน์ */
+@media (min-width: 1000px) {
+  .list { grid-template-columns: 1fr 1fr; }
+  .list > .empty { grid-column: 1 / -1; }
+}
+
+/* จอใหญ่ / TV สำหรับแดชบอร์ดหน้างาน */
+@media (min-width: 1600px) {
+  .wrap { max-width: 1560px; }
+  html { font-size: 18px; }
+  .stat .value { font-size: 4.2rem; }
+  .col ol { max-height: 68vh; }
+}
+@media (min-width: 2400px) {
+  html { font-size: 22px; }
+  .wrap { max-width: 2200px; }
+}
+
+/* โหมดแอป: ไม่มีแถบที่อยู่ของเบราว์เซอร์ ให้หัวเว็บชิดบนพอดี */
+@media (display-mode: standalone) {
+  body { overscroll-behavior-y: contain; }
+}
