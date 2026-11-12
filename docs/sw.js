@@ -6,7 +6,7 @@
  * - API (script.google.com) และทุกอย่างอื่น: ไม่แตะ ไม่ cache — ข้อมูลต้องสดเสมอ
  * เปลี่ยน VERSION เมื่อเพิ่ม/ลบไฟล์ใน SHELL
  */
-const VERSION = 'v11';
+const VERSION = 'v12';
 const SHELL_CACHE = 'shell-' + VERSION;
 const FONT_CACHE = 'fonts-' + VERSION;
 const NETWORK_TIMEOUT_MS = 4000;
@@ -34,7 +34,7 @@ async function networkFirst(req) {
   const cache = await caches.open(SHELL_CACHE);
   const url = new URL(req.url);
   const key = url.origin + url.pathname; // เก็บตาม path อย่างเดียว ไม่ให้ cache บวมตาม ?v= / ?source=
-  const net = fetch(req).then((res) => {
+  const net = fetch(new Request(req, { cache: 'no-cache' })).then((res) => {
     if (res && res.status === 200 && res.type === 'basic') cache.put(key, res.clone()).catch(() => {});
     return res;
   });
