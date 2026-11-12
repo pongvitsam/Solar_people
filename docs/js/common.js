@@ -197,7 +197,7 @@
       return true;
     },
     async refresh() {
-      return this.accept(await api.get('list', this.current ? { v: this.current.v } : {}));
+      return this.accept(await api.get('list', this.current ? { f: 2, v: this.current.v } : { f: 2 }));
     },
   };
 

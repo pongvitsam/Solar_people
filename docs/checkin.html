@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=4">
+  <link rel="stylesheet" href="styles.css?v=6">
 </head>
 <body>
   <header class="topbar">
@@ -70,6 +70,7 @@
     <form method="dialog" id="checkinForm">
       <h3>ยืนยันการลงทะเบียน</h3>
       <p class="company" id="dlgName"></p>
+      <p class="when">🕒 เวลาเข้างาน <b id="dlgTime"></b> น.</p>
       <div class="field">
         <label for="count">จำนวนผู้เข้างานของบริษัทนี้ (คน)</label>
         <div class="stepper">
@@ -98,8 +99,8 @@
     </form>
   </dialog>
 
-  <script src="js/config.js?v=4"></script>
-  <script src="js/common.js?v=4"></script>
+  <script src="js/config.js?v=6"></script>
+  <script src="js/common.js?v=6"></script>
   <script>
     (function () {
       const { api, cfg, session, escapeHtml, matches, fmtTime, fmtClock, toast, poll } = window.App;
@@ -233,7 +234,7 @@
                 <span class="tag">${escapeHtml(c.id)}</span>
                 ${c.mt ? `<span>${escapeHtml(c.mt)}</span>` : ''}
                 ${c.arrived
-                  ? `<span class="badge">✔ มาแล้ว</span><span>${fmtTime(c.time)}</span><span>${c.count} คน</span>${c.by ? `<span>บันทึกโดย ${escapeHtml(c.by)}</span>` : ''}`
+                  ? `<span class="badge">✔ มาแล้ว</span><span class="when-tag">🕒 ${c.time ? fmtClock(new Date(c.time)) + ' น.' : ''}</span><span>${c.count} คน</span>${c.by ? `<span>บันทึกโดย ${escapeHtml(c.by)}</span>` : ''}`
                   : '<span>ยังไม่มา</span>'}
               </div>
             </div>
@@ -270,6 +271,10 @@
         if (!c) return;
         state.target = c;
         $('dlgName').textContent = c.name;
+        const tick = () => { $('dlgTime').textContent = fmtClock(); };
+        tick();
+        clearInterval(state.clock);
+        state.clock = setInterval(tick, 1000);
         $('count').value = 1;
         $('checkinDialog').showModal();
         $('dlgOk').focus();
@@ -286,6 +291,7 @@
         $('count').value = v;
       }));
       $('dlgCancel').addEventListener('click', () => $('checkinDialog').close());
+      $('checkinDialog').addEventListener('close', () => clearInterval(state.clock));
       $('undoCancel').addEventListener('click', () => $('undoDialog').close());
 
       $('checkinForm').addEventListener('submit', (e) => {
@@ -293,7 +299,8 @@
         const count = parseInt($('count').value, 10);
         if (!(count >= 1 && count <= 999)) { toast('จำนวนคนต้องอยู่ระหว่าง 1–999', 'error'); return; }
         $('checkinDialog').close();
-        run('checkin', state.target, { count }, `✔ ลงทะเบียน "${state.target.name}" แล้ว (${count} คน)`);
+        run('checkin', state.target, { count }, (saved) =>
+          `✔ ลงทะเบียน "${saved.name}" แล้ว เวลา ${fmtClock(new Date(saved.time))} น. (${saved.count} คน)`);
       });
       $('undoForm').addEventListener('submit', (e) => {
         e.preventDefault();
@@ -314,12 +321,13 @@
         applyPending();
         render();
         try {
-          const r = await api.post(action, Object.assign({ token: s.token, id: c.id }, extra));
+          const r = await api.post(action, Object.assign({ token: s.token, id: c.id, f: 2 }, extra));
           state.pending.delete(c.id);
           state.busy.delete(c.id);
           App.list.accept(r);
           setData(App.list.current, true);
-          toast(okMsg, 'ok');
+          const saved = state.data.companies.find((x) => x.id === c.id) || c;
+          toast(typeof okMsg === 'function' ? okMsg(saved) : okMsg, 'ok');
         } catch (err) {
           state.pending.delete(c.id);
           state.busy.delete(c.id);

@@ -132,16 +132,33 @@ function doPost(e) {
 }
 
 const ROUTES = {
-  list: (p) => listCompanies_(p.v),
+  list: (p) => compat_(p, listCompanies_(p.v)),
   login: (p) => login_(p),
   me: (p) => ({ user: auth_(p.token) }),
-  checkin: (p) => checkin_(p),
-  undo: (p) => undo_(p),
+  checkin: (p) => compat_(p, checkin_(p)),
+  undo: (p) => compat_(p, undo_(p)),
   users: (p) => listUsers_(p),
   addUser: (p) => addUser_(p),
   updateUser: (p) => updateUser_(p),
   deleteUser: (p) => deleteUser_(p),
 };
+
+/**
+ * หน้าเว็บรุ่นใหม่ส่ง f=2 มาและรับรูปแบบย่อ
+ * หน้าเว็บรุ่นเก่าที่ยังค้างอยู่ใน cache ของเบราว์เซอร์ (ไม่มี f) ได้รูปแบบเดิม จะได้ไม่พัง
+ */
+function compat_(p, r) {
+  if (String(p.f) === '2') return r;
+  const d = r.d || listCompanies_().d; // หน้าเก่าไม่ส่ง v จึงไม่ได้คำตอบแบบ same อยู่แล้ว
+  return {
+    companies: d.c.map((x) => ({
+      id: x[0], name: x[1], mt: x[2], arrived: !!x[3], count: x[4],
+      time: x[5] ? new Date(x[5]).toISOString() : '', by: x[6],
+    })),
+    summary: d.s,
+    serverTime: new Date().toISOString(),
+  };
+}
 
 function handle_(p) {
   try {

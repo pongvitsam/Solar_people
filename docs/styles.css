@@ -236,3 +236,7 @@ th { font-size: .85rem; color: var(--muted); font-weight: 500; }
   .topbar .who { display: none; }
 }
 .nw { white-space: nowrap; font-weight: inherit; }
+
+dialog .when { margin: -8px 0 16px; color: var(--muted); }
+dialog .when b { color: var(--text); font-size: 1.15rem; font-variant-numeric: tabular-nums; }
+.item .when-tag { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--ok); }
