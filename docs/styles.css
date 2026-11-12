@@ -285,3 +285,24 @@ dialog .when b { color: var(--text); font-size: 1.15rem; font-variant-numeric: t
   .topbar, .no-print, .toasts { display: none !important; }
   body { background: #fff; }
 }
+
+/* ---------- Check-in: รายชื่อผู้เข้างานรายคน ---------- */
+.item-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.btn-sm { padding: 6px 12px; font-size: .88rem; }
+dialog.people-dialog { width: min(640px, calc(100vw - 24px)); }
+.people-wrap { padding: 20px; display: grid; gap: 14px; }
+.people-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.people-head h3 { margin: 0 0 2px; }
+.people-list { display: grid; gap: 6px; max-height: 38vh; overflow: auto; border: 1px solid var(--border); border-radius: 12px; padding: 6px; background: var(--surface-2); }
+.people-list .empty { padding: 16px; }
+.person { display: flex; gap: 10px; align-items: center; padding: 10px 12px; border-radius: 10px; background: var(--surface); }
+.person-info { flex: 1; min-width: 0; }
+.person-name { font-weight: 600; overflow-wrap: anywhere; }
+.person-meta { font-size: .85rem; overflow-wrap: anywhere; }
+.people-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.people-grid .field { margin: 0; }
+@media (max-width: 520px) {
+  .people-grid { grid-template-columns: 1fr; }
+  .item-actions { width: 100%; }
+  .item-actions .btn { flex: 1; }
+}

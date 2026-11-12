@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=7">
+  <link rel="stylesheet" href="styles.css?v=8">
 </head>
 <body>
   <header class="topbar">
@@ -86,6 +86,31 @@
     </form>
   </dialog>
 
+  <!-- ===== Modal: รายชื่อผู้เข้างานของบริษัท ===== -->
+  <dialog id="peopleDialog" class="people-dialog">
+    <div class="people-wrap">
+      <div class="people-head">
+        <div>
+          <h3>ผู้เข้างาน <span class="muted">(<span id="pplCount">0</span> คน)</span></h3>
+          <p class="company" id="pplCompany" style="margin:0"></p>
+        </div>
+        <button class="btn btn-ghost btn-sm" type="button" id="pplClose" aria-label="ปิด">✕</button>
+      </div>
+      <div id="pplList" class="people-list"></div>
+      <form id="pplForm" class="people-form" novalidate>
+        <div class="step-label" style="margin-top:0">+ เพิ่มผู้เข้างาน</div>
+        <div class="people-grid">
+          <div class="field"><label for="pName">ชื่อ-นามสกุล *</label><input id="pName" maxlength="100" autocomplete="off"></div>
+          <div class="field"><label for="pPhone">เบอร์โทรศัพท์ *</label><input id="pPhone" type="tel" inputmode="numeric" maxlength="15" autocomplete="off" placeholder="08xxxxxxxx"></div>
+          <div class="field"><label for="pPosition">ตำแหน่ง</label><input id="pPosition" maxlength="100" autocomplete="off"></div>
+          <div class="field"><label for="pEmail">อีเมล</label><input id="pEmail" type="email" inputmode="email" maxlength="120" autocomplete="off" autocapitalize="off"></div>
+        </div>
+        <p class="error-text" id="pplError" role="alert"></p>
+        <button class="btn btn-primary btn-block" type="submit" id="pplAdd">+ เพิ่มผู้เข้างาน</button>
+      </form>
+    </div>
+  </dialog>
+
   <!-- ===== Modal: confirm undo ===== -->
   <dialog id="undoDialog">
     <form method="dialog" id="undoForm">
@@ -99,8 +124,8 @@
     </form>
   </dialog>
 
-  <script src="js/config.js?v=7"></script>
-  <script src="js/common.js?v=7"></script>
+  <script src="js/config.js?v=8"></script>
+  <script src="js/common.js?v=8"></script>
   <script>
     (function () {
       const { api, cfg, session, escapeHtml, matches, fmtTime, fmtClock, toast, poll } = window.App;
@@ -235,13 +260,16 @@
                 ${c.mt ? `<span>${escapeHtml(c.mt)}</span>` : ''}
                 ${c.arrived
                   ? `<span class="badge">✔ มาแล้ว</span><span class="when-tag">🕒 ${c.time ? fmtClock(new Date(c.time)) + ' น.' : ''}</span><span>${c.count} คน</span>${
-                      c.staff ? (c.by ? `<span>บันทึกโดย ${escapeHtml(c.by)}</span>` : '') : `<span>ลงทะเบียนเอง ${c.self} คน</span>`}`
+                      c.staff ? (c.by ? `<span>บันทึกโดย ${escapeHtml(c.by)}</span>` : '') : `<span>ลงทะเบียนรายคน ${c.self} คน</span>`}`
                   : '<span>ยังไม่มา</span>'}
               </div>
             </div>
+            <div class="item-actions">
+            <button class="btn btn-ghost" data-people="${escapeHtml(c.id)}" title="ดู/เพิ่มรายชื่อผู้เข้างานของบริษัทนี้">👥 ผู้เข้างาน${c.self ? ` (${c.self})` : ''}</button>
             ${c.staff
               ? `<button class="btn btn-ghost" data-undo="${escapeHtml(c.id)}" ${busy ? 'disabled' : ''}>${busy ? 'กำลังบันทึก…' : 'ยกเลิก'}</button>`
               : `<button class="btn ${c.arrived ? 'btn-ghost' : 'btn-primary'}" data-checkin="${escapeHtml(c.id)}" ${busy ? 'disabled' : ''}>${busy ? 'กำลังบันทึก…' : (c.arrived ? '+ บันทึกเพิ่ม' : '✔ มาแล้ว')}</button>`}
+            </div>
           </article>`;
         }).join('') + (more > 0 ? `<div class="card empty">และอีก ${more} รายการ — พิมพ์ชื่อหรือ PEA No. เพื่อค้นหา</div>` : '');
       }
@@ -266,7 +294,117 @@
         const un = e.target.closest('[data-undo]');
         if (ci) openCheckin(byId(ci.dataset.checkin));
         if (un) openUndo(byId(un.dataset.undo));
+        const pe = e.target.closest('[data-people]');
+        if (pe) openPeople(byId(pe.dataset.people));
       });
+
+      /* ---------- รายชื่อผู้เข้างานรายคน (เจ้าหน้าที่กรอกแทน) ---------- */
+      const people = { company: null, list: [], loading: false };
+
+      function renderPeople() {
+        const box = $('pplList');
+        if (people.loading && !people.list.length) { box.innerHTML = '<div class="empty">กำลังโหลด…</div>'; return; }
+        $('pplCount').textContent = people.list.length;
+        box.innerHTML = people.list.length ? people.list.map((x) => `
+          <div class="person">
+            <div class="person-info">
+              <div class="person-name">${escapeHtml(x.name)}${x.position ? ` <span class="muted">· ${escapeHtml(x.position)}</span>` : ''}</div>
+              <div class="muted person-meta">📞 ${escapeHtml(x.phone)}${x.email ? ` · ${escapeHtml(x.email)}` : ''} · 🕒 ${x.time ? fmtClock(new Date(x.time)) + ' น.' : ''} · ${escapeHtml(x.channel)}</div>
+            </div>
+            <button class="btn btn-ghost btn-sm" type="button" data-remove="${escapeHtml(x.phone)}" aria-label="ลบ ${escapeHtml(x.name)}">ลบ</button>
+          </div>`).join('') : '<div class="empty">ยังไม่มีรายชื่อผู้เข้างาน</div>';
+      }
+
+      async function openPeople(c) {
+        if (!c) return;
+        const s = session.get();
+        if (!s) { showLogin(); return; }
+        people.company = c;
+        people.list = [];
+        people.loading = true;
+        $('pplCompany').textContent = `${c.name} (${c.id})`;
+        $('pplForm').reset();
+        $('pplError').textContent = '';
+        renderPeople();
+        $('peopleDialog').showModal();
+        $('pName').focus();
+        try {
+          const r = await api.post('companyPeople', { token: s.token, id: c.id });
+          if (people.company === c) { people.list = r.people; }
+        } catch (err) {
+          if (!handleAuthError(err)) $('pplError').textContent = err.message;
+        } finally {
+          people.loading = false;
+          renderPeople();
+        }
+      }
+
+      // หลังเพิ่ม/ลบ อัปเดตการ์ดบริษัทให้ตรงกับจำนวนคนทันที
+      function syncCompanyCount(id, n) {
+        [state.data, App.list.current].forEach((d) => {
+          const c = d && d.companies.find((x) => x.id === id);
+          if (!c) return;
+          const staffCount = c.staff ? c.count - (c.self || 0) : 0;
+          c.self = n;
+          c.count = staffCount + n;
+          c.arrived = c.staff || n > 0;
+          if (c.arrived && !c.time) c.time = Date.now();
+          if (!c.staff) c.by = n ? 'ลงทะเบียนรายคน' : '';
+          d.summary = App.summarize(d.companies);
+        });
+        render();
+      }
+
+      $('pplForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const s = session.get();
+        if (!s) { showLogin(); return; }
+        const name = $('pName').value.trim();
+        const phone = $('pPhone').value.replace(/\D/g, '');
+        const email = $('pEmail').value.trim();
+        if (name.length < 2) { $('pplError').textContent = 'กรุณากรอกชื่อ-นามสกุล'; $('pName').focus(); return; }
+        if (!/^0\d{8,9}$/.test(phone)) { $('pplError').textContent = 'เบอร์โทรศัพท์ต้องขึ้นต้นด้วย 0 และมี 9–10 หลัก'; $('pPhone').focus(); return; }
+        if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) { $('pplError').textContent = 'รูปแบบอีเมลไม่ถูกต้อง'; $('pEmail').focus(); return; }
+        const btn = $('pplAdd');
+        btn.disabled = true;
+        btn.textContent = 'กำลังบันทึก…';
+        $('pplError').textContent = '';
+        const c = people.company;
+        try {
+          const r = await api.post('staffRegister', { token: s.token, id: c.id, name, phone, email, position: $('pPosition').value.trim() });
+          people.list = r.people;
+          renderPeople();
+          syncCompanyCount(c.id, r.people.length);
+          $('pplForm').reset();
+          $('pName').focus();
+          toast(`✔ เพิ่ม ${r.name} เวลา ${fmtClock(new Date(r.time))} น.`, 'ok');
+        } catch (err) {
+          if (!handleAuthError(err)) $('pplError').textContent = err.message;
+        } finally {
+          btn.disabled = false;
+          btn.textContent = '+ เพิ่มผู้เข้างาน';
+        }
+      });
+
+      $('pplList').addEventListener('click', async (e) => {
+        const b = e.target.closest('[data-remove]');
+        if (!b) return;
+        const person = people.list.find((x) => x.phone === b.dataset.remove);
+        if (!person || !confirm(`ลบ "${person.name}" ออกจากรายชื่อผู้เข้างาน?`)) return;
+        const s = session.get();
+        b.disabled = true;
+        try {
+          const r = await api.post('removePerson', { token: s.token, id: people.company.id, phone: person.phone });
+          people.list = r.people;
+          renderPeople();
+          syncCompanyCount(people.company.id, r.people.length);
+          toast(`ลบ ${person.name} แล้ว`, 'ok');
+        } catch (err) {
+          b.disabled = false;
+          if (!handleAuthError(err)) toast(err.message, 'error');
+        }
+      });
+      $('pplClose').addEventListener('click', () => $('peopleDialog').close());
 
       function openCheckin(c) {
         if (!c) return;

@@ -13,7 +13,7 @@
  */
 
 const SHEET = { COMPANIES: 'Companies', USERS: 'Users', LOG: 'Log', REG: 'Registrations' };
-const BUILD = 'reg-lock-1'; // ใช้ตรวจว่า deployment ใหม่ใช้งานครบทุกเครื่องแล้ว (?action=ping)
+const BUILD = 'staff-person-1'; // ใช้ตรวจว่า deployment ใหม่ใช้งานครบทุกเครื่องแล้ว (?action=ping)
 
 const COMPANY_HEADERS = ['PEA No.', 'ชื่อบริษัท', 'เลขที่ มท.', 'ลงวันที่', 'สถานะ', 'จำนวนคน', 'เวลาเข้างาน', 'ผู้บันทึก'];
 const C = { ID: 0, NAME: 1, MT: 2, DATE: 3, STATUS: 4, COUNT: 5, TIME: 6, BY: 7 };
@@ -26,7 +26,9 @@ const LOG_HEADERS = ['เวลา', 'Action', 'CompanyID', 'ชื่อบร�
 /** ผู้เข้างานที่ลงทะเบียนเอง (1 แถว = 1 คน, เพิ่มต่อท้ายอย่างเดียว ไม่ต้องใช้ lock) */
 const REG_HEADERS = ['เวลา', 'PEA No.', 'ชื่อบริษัท', 'ชื่อ-สกุล', 'ตำแหน่ง', 'อีเมล', 'เบอร์โทร', 'ช่องทาง'];
 const R = { TIME: 0, ID: 1, COMPANY: 2, NAME: 3, POSITION: 4, EMAIL: 5, PHONE: 6, CHANNEL: 7 };
-const SELF_LABEL = 'ลงทะเบียนเอง';
+const SELF_LABEL = 'ลงทะเบียนเอง'; // ช่องทาง: ผู้เข้างานสแกน QR เอง
+const STAFF_CHANNEL_PREFIX = 'เจ้าหน้าที่: '; // ช่องทาง: เจ้าหน้าที่กรอกแทน
+const PERSON_LABEL = 'ลงทะเบียนรายคน';
 const TEST_CHANNELS = ['TEST', 'LOADTEST'];
 
 const STATUS_ARRIVED = 'มาแล้ว';
@@ -148,6 +150,9 @@ const ROUTES = {
   checkin: (p) => compat_(p, checkin_(p)),
   undo: (p) => compat_(p, undo_(p)),
   register: (p) => register_(p),
+  staffRegister: (p) => staffRegister_(p),
+  companyPeople: (p) => companyPeople_(p),
+  removePerson: (p) => removePerson_(p),
   ping: () => ({ build: BUILD }),
   getEventCode: (p) => { auth_(p.token, true); return { code: eventCode_() }; },
   setEventCode: (p) => setEventCode_(p),
@@ -254,7 +259,7 @@ function buildList_(values, agg) {
     const isArrived = c.arrived || reg.n > 0;
     const count = (c.arrived ? c.count : 0) + reg.n;
     const times = [c.arrived ? c.time : 0, reg.first].filter(Boolean);
-    const by = c.arrived ? (reg.n ? `${c.by} + ${SELF_LABEL} ${reg.n}` : c.by) : (reg.n ? SELF_LABEL : '');
+    const by = c.arrived ? (reg.n ? `${c.by} + ${PERSON_LABEL} ${reg.n}` : c.by) : (reg.n ? PERSON_LABEL : '');
     if (isArrived) { arrived++; people += count; }
     rows.push([c.id, c.name, c.mt, isArrived ? 1 : 0, count, times.length ? Math.min(...times) : 0, by, c.arrived ? 1 : 0, reg.n]);
   });
@@ -447,13 +452,33 @@ function register_(p) {
   if (!code || code !== eventCode_()) {
     throw new AppError('BAD_CODE', 'รหัสงานไม่ถูกต้อง กรุณาสแกน QR Code ที่จุดลงทะเบียนหน้างาน');
   }
+  const channel = TEST_CHANNELS.indexOf(p.channel) >= 0 ? p.channel : SELF_LABEL;
+  return addPerson_(p, { strict: true, channel });
+}
+
+/** เจ้าหน้าที่ลงทะเบียนรายคนแทนผู้เข้างาน (บังคับแค่ชื่อและเบอร์) */
+function staffRegister_(p) {
+  const user = auth_(p.token);
+  const channel = TEST_CHANNELS.indexOf(p.channel) >= 0 ? p.channel : STAFF_CHANNEL_PREFIX + user.name;
+  const r = addPerson_(p, { strict: false, channel });
+  CacheService.getScriptCache().remove('list_head'); // ให้หน้าเจ้าหน้าที่/แดชบอร์ดเห็นทันที
+  log_('ADD_PERSON', { id: r.id, name: r.company }, 1, user);
+  return Object.assign(r, companyPeople_(p, user));
+}
+
+/**
+ * บันทึกผู้เข้างาน 1 คนลงแท็บ Registrations
+ * strict = true (ผู้เข้างานกรอกเอง): บังคับ ชื่อ ตำแหน่ง อีเมล เบอร์
+ * strict = false (เจ้าหน้าที่กรอกแทน): บังคับ ชื่อ เบอร์ ส่วนตำแหน่ง/อีเมล ไม่บังคับ
+ */
+function addPerson_(p, opt) {
   const name = String(p.name || '').trim().replace(/\s+/g, ' ');
   const position = String(p.position || '').trim().replace(/\s+/g, ' ');
   const email = String(p.email || '').trim().toLowerCase();
   const phone = normPhone_(p.phone);
   if (name.length < 2 || name.length > 100) throw new AppError('BAD_INPUT', 'กรุณากรอกชื่อ-สกุล');
-  if (!position || position.length > 100) throw new AppError('BAD_INPUT', 'กรุณากรอกตำแหน่ง');
-  if (!EMAIL_RE.test(email) || email.length > 120) throw new AppError('BAD_INPUT', 'รูปแบบอีเมลไม่ถูกต้อง');
+  if (position.length > 100 || (opt.strict && !position)) throw new AppError('BAD_INPUT', 'กรุณากรอกตำแหน่ง');
+  if (email.length > 120 || ((opt.strict || email) && !EMAIL_RE.test(email))) throw new AppError('BAD_INPUT', 'รูปแบบอีเมลไม่ถูกต้อง');
   if (!/^0\d{8,9}$/.test(phone)) throw new AppError('BAD_INPUT', 'เบอร์โทรศัพท์ต้องเป็นตัวเลข 9–10 หลัก');
 
   // ตรวจบริษัทจากรายชื่อที่ cache ไว้ (ไม่ต้องอ่าน Sheet ถ้า cache ยังอยู่)
@@ -469,7 +494,6 @@ function register_(p) {
   if (phones.indexOf(phone) >= 0) throw new AppError('DUPLICATE', dupMsg());
 
   const sh = regSheet_();
-  const channel = TEST_CHANNELS.indexOf(p.channel) >= 0 ? p.channel : SELF_LABEL;
   // appendRow พร้อมกันหลาย request เขียนทับแถวเดียวกันได้ (ข้อมูลหาย — พบจาก load test)
   // จึงล็อกเฉพาะช่วงเขียนแถว ซึ่งสั้นมาก (ไม่อ่านทั้งชีตเหมือนการเช็คอินของเจ้าหน้าที่)
   const lock = LockService.getScriptLock();
@@ -482,13 +506,61 @@ function register_(p) {
     if (cache.get('ph_' + phone)) throw new AppError('DUPLICATE', dupMsg(JSON.parse(cache.get('ph_' + phone) || '{}').company));
     now = new Date();
     // ใส่ ' นำหน้าเบอร์ เพื่อให้ Sheet เก็บเป็นข้อความ (ไม่ตัด 0 ข้างหน้า)
-    sh.appendRow([now, row[0], row[1], name, position, email, "'" + phone, channel]);
+    sh.appendRow([now, row[0], row[1], name, position, email, "'" + phone, opt.channel]);
     SpreadsheetApp.flush();
     cache.put('ph_' + phone, JSON.stringify({ company: row[1], t: now.getTime() }), PHONE_TTL_SEC);
   } finally {
     lock.releaseLock();
   }
   return { time: now.getTime(), company: row[1], id: row[0], name };
+}
+
+/** รายชื่อผู้เข้างานของบริษัท (เฉพาะเจ้าหน้าที่ที่ล็อกอิน) */
+function companyPeople_(p, user) {
+  if (!user) auth_(p.token);
+  const id = String(p.id || '').trim();
+  const sh = ss_().getSheetByName(SHEET.REG);
+  const people = [];
+  if (sh && sh.getLastRow() >= 2) {
+    sh.getRange(2, 1, sh.getLastRow() - 1, REG_HEADERS.length).getValues().forEach((r) => {
+      if (String(r[R.ID]).trim() !== id) return;
+      people.push({
+        name: String(r[R.NAME]),
+        position: String(r[R.POSITION]),
+        email: String(r[R.EMAIL]),
+        phone: normPhone_(r[R.PHONE]),
+        channel: String(r[R.CHANNEL]),
+        time: r[R.TIME] instanceof Date ? r[R.TIME].getTime() : 0,
+      });
+    });
+  }
+  return { people };
+}
+
+/** ลบผู้เข้างาน 1 คน (ระบุด้วยบริษัท + เบอร์) กรณีกรอกผิด */
+function removePerson_(p) {
+  const user = auth_(p.token);
+  const id = String(p.id || '').trim();
+  const phone = normPhone_(p.phone);
+  const sh = regSheet_();
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) throw new AppError('BUSY', 'ระบบไม่ว่าง กรุณาลองอีกครั้ง');
+  let removed;
+  try {
+    const last = sh.getLastRow();
+    const values = last < 2 ? [] : sh.getRange(2, 1, last - 1, REG_HEADERS.length).getValues();
+    const i = values.findIndex((r) => String(r[R.ID]).trim() === id && normPhone_(r[R.PHONE]) === phone);
+    if (i < 0) throw new AppError('NOT_FOUND', 'ไม่พบผู้เข้างานคนนี้ (อาจถูกลบไปแล้ว)');
+    removed = values[i];
+    sh.deleteRow(i + 2);
+    SpreadsheetApp.flush();
+  } finally {
+    lock.releaseLock();
+  }
+  const cache = CacheService.getScriptCache();
+  cache.removeAll(['ph_' + phone, 'list_head', 'reg_phones']);
+  log_('REMOVE_PERSON', { id, name: String(removed[R.COMPANY]) }, 1, user);
+  return companyPeople_(p, user);
 }
 
 /** ลบข้อมูลทดสอบ (ช่องทาง TEST / LOADTEST) ออกจากแท็บ Registrations */
