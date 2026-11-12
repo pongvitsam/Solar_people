@@ -97,7 +97,14 @@
           <tbody id="rows"></tbody>
         </table>
       </div>
-      <p style="color:var(--muted);font-size:.9rem;margin:12px 0 40px">ผู้ใช้ที่ถูกปิดหรือลบจะใช้งานต่อไม่ได้ทันที</p>
+      <p style="color:var(--muted);font-size:.9rem;margin:12px 0 24px">ผู้ใช้ที่ถูกปิดหรือลบจะใช้งานต่อไม่ได้ทันที</p>
+
+      <div class="section-title"><h1 style="color:var(--danger)">รีเซตข้อมูลการลงทะเบียน</h1></div>
+      <section class="card" style="padding:16px;border-color:var(--danger);margin-bottom:40px">
+        <p style="margin:0 0 6px"><b>ล้างผู้เข้างานทุกคน และสถานะ “มาแล้ว” ของทุกบริษัท</b> เพื่อเริ่มงานใหม่</p>
+        <p class="muted" style="margin:0 0 12px;font-size:.9rem">ระบบสำรองข้อมูลเป็นแท็บใหม่ใน Google Sheet ก่อนล้างทุกครั้ง (ชื่อขึ้นต้นด้วย “สำรอง_”) ไม่ลบรายชื่อบริษัท ผู้ใช้ รหัสงาน และประวัติ Log</p>
+        <button class="btn btn-danger" type="button" id="resetBtn">รีเซตข้อมูลการลงทะเบียน…</button>
+      </section>
       </div>
     </div>
   </main>
@@ -252,6 +259,26 @@
 
       /* ---------- ส่งออกรายชื่อ Excel / PDF (js/export.js) ---------- */
       App.exports.bind((err) => { session.clear(); fail(err.message, true); });
+
+      /* ---------- รีเซตข้อมูลการลงทะเบียน ---------- */
+      $('resetBtn').addEventListener('click', async () => {
+        if (!confirm('รีเซตข้อมูลการลงทะเบียนทั้งหมด?\n\nผู้เข้างานทุกคนและสถานะ "มาแล้ว" ของทุกบริษัทจะถูกล้าง (มีแท็บสำรองใน Google Sheet)')) return;
+        const word = prompt('พิมพ์ RESET (ตัวพิมพ์ใหญ่) เพื่อยืนยัน');
+        if (word !== 'RESET') { if (word !== null) toast('ยกเลิกการรีเซต: พิมพ์ยืนยันไม่ตรง', 'error'); return; }
+        const btn = $('resetBtn');
+        btn.disabled = true;
+        try {
+          const r = await App.postRetry('resetRegistrations', { token: s.token, confirm: word });
+          try { localStorage.removeItem('solar_people_snapshot_v2'); localStorage.removeItem('solar_people_registered'); } catch (e) { /* ignore */ }
+          toast(`รีเซตแล้ว: ผู้เข้างาน ${r.people} คน, บริษัท ${r.companies} แห่ง`, 'ok');
+          if (r.backups.length) alert('สำรองข้อมูลไว้ในแท็บ:\n' + r.backups.join('\n'));
+        } catch (err) {
+          if (err.code === 'SESSION_EXPIRED') { session.clear(); fail(err.message, true); }
+          else toast(err.message || 'รีเซตไม่สำเร็จ', 'error');
+        } finally {
+          btn.disabled = false;
+        }
+      });
 
       call('users', {}).then((ok) => { if (ok) loadCode(); });
     })();

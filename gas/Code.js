@@ -12,7 +12,7 @@
  * ครั้งแรก: รันฟังก์ชัน setup() ใน editor หนึ่งครั้ง เพื่อสร้าง Google Sheet และอนุญาตสิทธิ์
  */
 
-const SHEET = { COMPANIES: 'Companies', USERS: 'Users', LOG: 'Log', REG: 'Registrations' };
+const SHEET = { COMPANIES: 'Companies', USERS: 'Users', LOG: 'Log', REG: 'Registrations', OFF: 'นอกรายชื่อ' };
 const BUILD = 'offlist-1'; // ใช้ตรวจว่า deployment ใหม่ใช้งานครบทุกเครื่องแล้ว (?action=ping)
 
 const COMPANY_HEADERS = ['PEA No.', 'ชื่อบริษัท', 'เลขที่ มท.', 'ลงวันที่', 'สถานะ', 'จำนวนคน', 'เวลาเข้างาน', 'ผู้บันทึก'];
@@ -170,6 +170,7 @@ const ROUTES = {
   staffRegister: (p) => staffRegister_(p),
   companyPeople: (p) => companyPeople_(p),
   exportPeople: (p) => exportPeople_(p),
+  resetRegistrations: (p) => resetRegistrations_(p),
   removePerson: (p) => removePerson_(p),
   ping: () => ({ build: BUILD }),
   getEventCode: (p) => { auth_(p.token, true); return { code: eventCode_() }; },
@@ -633,6 +634,7 @@ function addPerson_(p, opt) {
   } finally {
     lock.releaseLock();
   }
+  if (id.indexOf(OFFLIST_PREFIX) === 0) syncOfflistSheet_(); // สรุปบริษัทนอกรายชื่อลงแท็บแยก (เกิดไม่บ่อย จึงไม่กระทบความเร็ว)
   return { time: now.getTime(), company: row[1], id: row[0], name, position, email, phone, channel: opt.channel };
 }
 
@@ -658,6 +660,49 @@ function companyPeople_(p) {
   return { people };
 }
 
+/**
+ * สรุปบริษัทนอกรายชื่อลงแท็บ "นอกรายชื่อ" (สร้างให้อัตโนมัติ): 1 แถว = 1 บริษัท
+ * สร้างใหม่ทั้งแท็บจากแท็บ Registrations ทุกครั้งที่มีการเพิ่ม/ลบผู้เข้างานของบริษัทนอกรายชื่อ
+ * ถ้าไม่ว่างภายในเวลาที่กำหนดจะข้ามไป (ครั้งถัดไปจะสร้างใหม่ให้ถูกต้อง)
+ */
+const OFF_HEADERS = ['รหัส (X-)', 'ชื่อบริษัท', 'จำนวนคน', 'ลงทะเบียนครั้งแรก', 'รายชื่อผู้เข้างาน'];
+
+function syncOfflistSheet_() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(15000)) return;
+  try {
+    const ss = ss_();
+    const reg = ss.getSheetByName(SHEET.REG);
+    const groups = {};
+    if (reg && reg.getLastRow() >= 2) {
+      reg.getRange(2, 1, reg.getLastRow() - 1, REG_HEADERS.length).getValues().forEach((r) => {
+        const id = String(r[R.ID]).trim();
+        if (id.indexOf(OFFLIST_PREFIX) !== 0) return;
+        const time = r[R.TIME] instanceof Date ? r[R.TIME].getTime() : 0;
+        const g = groups[id] || (groups[id] = { id, name: String(r[R.COMPANY]).trim(), n: 0, first: 0, people: [] });
+        g.n++;
+        g.people.push(String(r[R.NAME]).trim());
+        if (time && (!g.first || time < g.first)) { g.first = time; g.name = String(r[R.COMPANY]).trim() || g.name; }
+      });
+    }
+    const list = Object.keys(groups).map((k) => groups[k]).sort((a, b) => a.first - b.first);
+    if (!list.length && !ss.getSheetByName(SHEET.OFF)) return; // ยังไม่เคยมีบริษัทนอกรายชื่อ ไม่ต้องสร้างแท็บ
+    const sh = ensureSheet_(ss, SHEET.OFF, OFF_HEADERS);
+    const maxRows = Math.max(sh.getMaxRows() - 1, 1);
+    sh.getRange(2, 1, maxRows, OFF_HEADERS.length).clearContent();
+    if (list.length) {
+      const range = sh.getRange(2, 1, list.length, OFF_HEADERS.length);
+      range.setNumberFormats(list.map(() => ['@', '@', '0', 'dd/MM/yyyy HH:mm:ss', '@'])); // ข้อความล้วน ไม่ถูกตีเป็นสูตร
+      range.setValues(list.map((g) => [g.id, g.name, g.n, g.first ? new Date(g.first) : '', g.people.join(', ')]));
+    }
+    sh.setColumnWidth(2, 320);
+    sh.setColumnWidth(5, 420);
+    SpreadsheetApp.flush();
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 /** รายชื่อผู้เข้างานทั้งหมด สำหรับส่งออก Excel/PDF (เจ้าหน้าที่ที่ล็อกอิน ไม่รวมข้อมูลทดสอบ) */
 function exportPeople_(p) {
   auth_(p.token);
@@ -679,6 +724,56 @@ function exportPeople_(p) {
     });
   }
   return { people };
+}
+
+/**
+ * รีเซตข้อมูลการลงทะเบียนทั้งหมด (เฉพาะแอดมิน): ล้างแท็บ Registrations และสถานะมาแล้วในแท็บ Companies
+ * สำรองสำเนาไว้เป็นแท็บใหม่ใน Sheet ก่อนล้างทุกครั้ง (กู้คืนได้) ไม่แตะรายชื่อบริษัท ผู้ใช้ รหัสงาน และแท็บ Log
+ */
+function resetRegistrations_(p) {
+  const user = auth_(p.token, true);
+  if (String(p.confirm || '') !== 'RESET') throw new AppError('BAD_INPUT', 'ต้องพิมพ์ RESET เพื่อยืนยันการรีเซต');
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) throw new AppError('BUSY', 'ระบบไม่ว่าง กรุณาลองอีกครั้ง');
+  const ss = ss_();
+  const ts = Utilities.formatDate(new Date(), 'Asia/Bangkok', 'yyyyMMdd_HHmmss');
+  const backups = [];
+  let people = 0, companies = 0;
+  const phones = [];
+  try {
+    const reg = ss.getSheetByName(SHEET.REG);
+    const comp = ss.getSheetByName(SHEET.COMPANIES);
+    const regLast = reg ? reg.getLastRow() : 0;
+    const compLast = comp ? comp.getLastRow() : 0;
+    const arrived = compLast >= 2
+      ? comp.getRange(2, C.STATUS + 1, compLast - 1, 1).getValues().filter((r) => String(r[0]).trim() !== '').length
+      : 0;
+    // สำรองก่อนล้าง
+    if (regLast >= 2) { reg.copyTo(ss).setName('สำรอง_ผู้เข้างาน_' + ts); backups.push('สำรอง_ผู้เข้างาน_' + ts); }
+    if (arrived > 0) { comp.copyTo(ss).setName('สำรอง_บริษัท_' + ts); backups.push('สำรอง_บริษัท_' + ts); }
+    if (regLast >= 2) {
+      reg.getRange(2, 1, regLast - 1, REG_HEADERS.length).getValues().forEach((r) => {
+        const ph = normPhone_(r[R.PHONE]);
+        if (ph) phones.push('ph_' + ph);
+      });
+      people = regLast - 1;
+      reg.getRange(2, 1, regLast - 1, REG_HEADERS.length).clearContent();
+    }
+    if (arrived > 0) {
+      comp.getRange(2, C.STATUS + 1, compLast - 1, 4).clearContent();
+      companies = arrived;
+    }
+    SpreadsheetApp.flush();
+  } finally {
+    lock.releaseLock();
+  }
+  bumpListGen_();
+  const cache = CacheService.getScriptCache();
+  for (let i = 0; i < phones.length; i += 100) cache.removeAll(phones.slice(i, i + 100)); // removeAll รับได้ครั้งละ 100 คีย์
+  cache.removeAll(['list_head', 'reg_phones']);
+  syncOfflistSheet_();
+  log_('RESET', { id: '', name: `รีเซตข้อมูล (ผู้เข้างาน ${people} คน, บริษัท ${companies})` }, people, user);
+  return { people, companies, backups };
 }
 
 /** ลบผู้เข้างาน 1 คน (ระบุด้วยบริษัท + เบอร์) กรณีกรอกผิด */
@@ -703,6 +798,7 @@ function removePerson_(p) {
   }
   bumpListGen_();
   CacheService.getScriptCache().removeAll(['ph_' + phone, 'list_head', 'reg_phones']);
+  if (id.indexOf(OFFLIST_PREFIX) === 0) syncOfflistSheet_();
   log_('REMOVE_PERSON', { id, name: String(removed[R.COMPANY]) }, 1, user);
   return { removed: phone };
 }
