@@ -145,5 +145,13 @@
     return { now: tick };
   }
 
+  // ใส่ชื่อหน่วยงาน/ชื่องานบนแถบหัวเว็บทุกหน้า
+  document.addEventListener('DOMContentLoaded', () => {
+    const org = document.getElementById('orgName');
+    if (org) org.textContent = cfg.ORG_NAME || '';
+    const ev = document.getElementById('eventName');
+    if (ev && !ev.dataset.fixed) ev.textContent = cfg.EVENT_NAME;
+  });
+
   window.App = { cfg, api, session, ApiError, escapeHtml, matches, fmtTime, fmtClock, toast, poll };
 })();

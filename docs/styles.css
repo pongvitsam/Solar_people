@@ -5,8 +5,10 @@
   --border: #dde3e9;
   --text: #15202b;
   --muted: #5b6b7a;
-  --brand: #1f3b57;
+  --brand: #5b2179; /* โทนม่วง กฟภ. */
   --brand-ink: #ffffff;
+  --topbar: #5b2179;
+  --topbar-ink: #ffffff;
   --accent: #f2a516;
   --accent-soft: #fff4dc;
   --ok: #16834a;
@@ -26,7 +28,8 @@
     --border: #2b3a49;
     --text: #e8eef4;
     --muted: #93a4b5;
-    --brand: #8fb8de;
+    --brand: #c7a2e0;
+    --topbar: #45185e;
     --brand-ink: #0f1720;
     --accent: #f5b638;
     --accent-soft: #3a2d10;
@@ -59,8 +62,9 @@ button, input, select { font: inherit; color: inherit; }
 
 /* ---------- Top bar ---------- */
 .topbar {
-  background: var(--brand);
-  color: var(--brand-ink);
+  background: var(--topbar);
+  color: var(--topbar-ink);
+  border-bottom: 3px solid var(--accent);
   position: sticky;
   top: 0;
   z-index: 20;
@@ -72,7 +76,9 @@ button, input, select { font: inherit; color: inherit; }
   background: radial-gradient(circle at 50% 50%, var(--accent) 45%, transparent 47%),
               conic-gradient(from 0deg, var(--accent) 0 8%, transparent 0 12.5%, var(--accent) 0 20.5%, transparent 0 25%, var(--accent) 0 33%, transparent 0 37.5%, var(--accent) 0 45.5%, transparent 0 50%, var(--accent) 0 58%, transparent 0 62.5%, var(--accent) 0 70.5%, transparent 0 75%, var(--accent) 0 83%, transparent 0 87.5%, var(--accent) 0 95.5%, transparent 0);
 }
-.brand span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.brand-text { display: grid; min-width: 0; line-height: 1.25; }
+.brand-text small { font-size: .78rem; font-weight: 500; opacity: .85; letter-spacing: .01em; }
+.brand-text span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 1.1rem; }
 .topbar .who { font-size: .9rem; opacity: .9; }
 .topbar .link { text-decoration: none; font-size: .9rem; padding: 6px 12px; border-radius: 999px; border: 1px solid currentColor; opacity: .9; background: transparent; cursor: pointer; }
 .topbar .link:hover { opacity: 1; }
