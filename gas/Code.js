@@ -35,7 +35,7 @@ const STATUS_ARRIVED = 'มาแล้ว';
 const SESSION_TTL_SEC = 6 * 60 * 60; // 6 ชั่วโมง (สูงสุดของ CacheService)
 const USERNAME_RE = /^[A-Za-z0-9._-]{2,30}$/;
 const SESSION_GEN = 'pw-1'; // เปลี่ยนค่านี้เมื่อต้องการบังคับให้ทุกคนล็อกอินใหม่
-const PW_MIN = 6;
+const PW_MIN = 8;
 const PW_ROUNDS = 200;
 const MAX_LOGIN_FAILS = 5; // ใส่รหัสผิดเกินนี้ภายใน 10 นาที จะถูกล็อกชั่วคราว
 
@@ -143,7 +143,10 @@ function ss_() {
 
 function doGet(e) {
   const p = (e && e.parameter) || {};
-  return handle_(Object.assign({ action: 'list' }, p));
+  // GET ใช้ได้เฉพาะคำสั่งอ่านข้อมูลสาธารณะ (ที่เหลือต้อง POST เพื่อไม่ให้ token/รหัสผ่านไปอยู่ใน URL)
+  const action = p.action || 'list';
+  if (GET_ACTIONS.indexOf(action) < 0) return json_({ ok: false, code: 'BAD_ACTION', error: 'ไม่รู้จักคำสั่ง: ' + action });
+  return handle_(Object.assign({}, p, { action }));
 }
 
 function doPost(e) {
@@ -155,6 +158,8 @@ function doPost(e) {
   }
   return handle_(body);
 }
+
+const GET_ACTIONS = ['list', 'ping'];
 
 const ROUTES = {
   list: (p) => compat_(p, listCompanies_(p.v)),
@@ -396,8 +401,14 @@ function undo_(p) {
   });
 }
 
+/** กัน formula injection: ข้อความที่ขึ้นต้นด้วย = + - @ จะถูกเขียนเป็นข้อความ ไม่ใช่สูตร */
+function safeCell_(v) {
+  const s = String(v == null ? '' : v);
+  return /^[=+\-@\t\r]/.test(s) ? "'" + s : s;
+}
+
 function log_(action, company, count, user) {
-  ss_().getSheetByName(SHEET.LOG).appendRow([new Date(), action, company.id, company.name, count, user.name + ' (' + user.username + ')']);
+  ss_().getSheetByName(SHEET.LOG).appendRow([new Date(), action, safeCell_(company.id), safeCell_(company.name), count, safeCell_(user.name + ' (' + user.username + ')')]);
 }
 
 /* ------------------------------------------------------------------ */
@@ -816,21 +827,27 @@ function login_(p) {
   const password = String(p.password || '');
   const cache = CacheService.getScriptCache();
   const failKey = 'lf_' + username.toLowerCase();
-  const fails = Number(cache.get(failKey) || 0);
-  if (fails >= MAX_LOGIN_FAILS) throw new AppError('LOCKED', 'ใส่รหัสผ่านผิดหลายครั้ง กรุณารอ 10 นาทีแล้วลองใหม่');
+
+  // จองสิทธิ์ลองรหัส 1 ครั้งก่อนตรวจ (อ่าน+เพิ่มตัวนับภายใน lock) — กันการยิงคำขอพร้อมกันเพื่อเลี่ยงตัวนับ
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) throw new AppError('BUSY', 'ระบบมีผู้ใช้งานพร้อมกันจำนวนมาก กรุณาลองอีกครั้ง');
+  let attempts;
+  try {
+    attempts = Number(cache.get(failKey) || 0) + 1;
+    if (attempts <= MAX_LOGIN_FAILS + 1) cache.put(failKey, String(attempts), 600);
+  } finally {
+    lock.releaseLock();
+  }
+  if (attempts > MAX_LOGIN_FAILS) throw new AppError('LOCKED', 'ใส่รหัสผ่านผิดหลายครั้ง กรุณารอ 10 นาทีแล้วลองใหม่');
 
   const values = userValues_();
   const i = username ? findUser_(values, username) : -1;
   const user = i >= 0 ? toUser_(values[i]) : null;
   const stored = i >= 0 ? String(values[i][U.PASS] || '') : '';
-  if (user && user.active && !stored) {
-    throw new AppError('NO_PASSWORD', 'บัญชีนี้ยังไม่ได้ตั้งรหัสผ่าน กรุณาติดต่อผู้ดูแลระบบ');
+  // ข้อความเดียวกันทุกกรณี (ไม่บอกว่าชื่อผู้ใช้มีอยู่จริง/ยังไม่มีรหัส/ถูกปิด)
+  if (!user || !user.active || !checkPassword_(password, stored)) {
+    throw new AppError('LOGIN_FAILED', 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง หรือบัญชีถูกปิดการใช้งาน');
   }
-  if (!user || !checkPassword_(password, stored)) {
-    cache.put(failKey, String(fails + 1), 600);
-    throw new AppError('LOGIN_FAILED', 'ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง');
-  }
-  if (!user.active) throw new AppError('LOGIN_FAILED', 'ผู้ใช้นี้ถูกปิดการใช้งาน');
   cache.remove(failKey);
   const token = Utilities.getUuid();
   cache.put('s_' + token, JSON.stringify({ u: user.username, g: SESSION_GEN }), SESSION_TTL_SEC);
