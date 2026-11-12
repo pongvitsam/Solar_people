@@ -79,7 +79,7 @@
           <input id="nName" placeholder="เช่น สมชาย ใจดี">
         </div>
         <div class="field">
-          <label for="nPass">รหัสผ่าน (อย่างน้อย 8 ตัว)</label>
+          <label for="nPass">รหัสผ่าน (อย่างน้อย 6 ตัว)</label>
           <input id="nPass" type="text" autocomplete="new-password" spellcheck="false" placeholder="ตั้งรหัสผ่าน">
         </div>
         <div class="field">
@@ -170,7 +170,7 @@
           return;
         }
         const password = $('nPass').value;
-        if (password.length < 8) { toast('รหัสผ่านต้องยาวอย่างน้อย 8 ตัวอักษร', 'error'); $('nPass').focus(); return; }
+        if (password.length < 6) { toast('รหัสผ่านต้องยาวอย่างน้อย 6 ตัวอักษร', 'error'); $('nPass').focus(); return; }
         const btn = e.submitter;
         if (btn) btn.disabled = true;
         const ok = await call('addUser', { username, password, name: $('nName').value.trim(), role: $('nRole').value }, `เพิ่มผู้ใช้ ${username} แล้ว`);
@@ -189,9 +189,9 @@
         } else if (b.dataset.act === 'role') {
           call('updateUser', { username, role: b.dataset.v }, 'บันทึกแล้ว');
         } else if (b.dataset.act === 'password') {
-          const password = prompt(`ตั้งรหัสผ่านใหม่ให้ "${username}" (อย่างน้อย 8 ตัวอักษร)`);
+          const password = prompt(`ตั้งรหัสผ่านใหม่ให้ "${username}" (อย่างน้อย 6 ตัวอักษร)`);
           if (password == null) return;
-          if (password.length < 8) { toast('รหัสผ่านต้องยาวอย่างน้อย 8 ตัวอักษร', 'error'); return; }
+          if (password.length < 6) { toast('รหัสผ่านต้องยาวอย่างน้อย 6 ตัวอักษร', 'error'); return; }
           call('setPassword', { username, password }, `ตั้งรหัสผ่านให้ ${username} แล้ว`);
         }
       });

@@ -35,7 +35,7 @@ const STATUS_ARRIVED = 'มาแล้ว';
 const SESSION_TTL_SEC = 6 * 60 * 60; // 6 ชั่วโมง (สูงสุดของ CacheService)
 const USERNAME_RE = /^[A-Za-z0-9._-]{2,30}$/;
 const SESSION_GEN = 'pw-1'; // เปลี่ยนค่านี้เมื่อต้องการบังคับให้ทุกคนล็อกอินใหม่
-const PW_MIN = 8;
+const PW_MIN = 6;
 const PW_ROUNDS = 200;
 const MAX_LOGIN_FAILS = 5; // ใส่รหัสผิดเกินนี้ภายใน 10 นาที จะถูกล็อกชั่วคราว
 
