@@ -56,6 +56,16 @@ function connectSheet() {
   return setup();
 }
 
+/**
+ * ตั้งค่าโปรเจกต์ Apps Script ใหม่ในคราวเดียว (รันใน editor หนึ่งครั้ง):
+ * 1) เชื่อม Sheet เดิม (ข้อมูลเดิมอยู่ครบ)  2) สร้างรหัสผ่านให้บัญชีที่ยังไม่มี แล้วแสดงใน Execution log
+ */
+function setupNewProject() {
+  const url = connectSheet();
+  Logger.log('เชื่อม Sheet แล้ว: ' + url);
+  initPasswords();
+}
+
 function setup() {
   const props = PropertiesService.getScriptProperties();
   let ss = null;
