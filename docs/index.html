@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>แดชบอร์ดลงทะเบียน</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap">
+      <div class="brand"><i class="sun" aria-hidden="true"></i><span id="eventName">แดชบอร์ด</span></div>
+      <a class="link" href="checkin.html">ลงทะเบียน (เจ้าหน้าที่)</a>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <div id="notice" class="notice" hidden></div>
+
+    <section class="stats" aria-label="สรุปการลงทะเบียน">
+      <div class="card stat"><div class="label">บริษัททั้งหมด</div><div class="value" id="sTotal">–</div></div>
+      <div class="card stat ok"><div class="label">มาแล้ว</div><div class="value" id="sArrived">–</div></div>
+      <div class="card stat wait"><div class="label">คงเหลือ</div><div class="value" id="sRemaining">–</div></div>
+      <div class="card stat"><div class="label">จำนวนผู้เข้างาน</div><div class="value" id="sPeople">–</div><div class="sub">คน</div></div>
+    </section>
+
+    <section class="card progress">
+      <div class="row">
+        <span>ความคืบหน้าการลงทะเบียน</span>
+        <span class="pct" id="pct">0%</span>
+      </div>
+      <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" id="bar"><i></i></div>
+    </section>
+
+    <div class="toolbar">
+      <label class="search" id="searchBox">
+        <span class="sr-only">ค้นหาบริษัท</span>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input id="q" type="search" placeholder="ค้นหาชื่อบริษัท หรือ PEA No.…" autocomplete="off">
+        <button class="clear" type="button" aria-label="ล้างคำค้นหา">✕</button>
+      </label>
+      <span class="live" id="live"><i class="dot"></i><span id="liveText">กำลังโหลด…</span></span>
+    </div>
+
+    <section class="cols">
+      <div class="card col ok">
+        <h2>✅ มาแล้ว <span class="count" id="cArrived">0</span></h2>
+        <ol id="listArrived"></ol>
+      </div>
+      <div class="card col wait">
+        <h2>⏳ ยังไม่มา <span class="count" id="cPending">0</span></h2>
+        <ol id="listPending"></ol>
+      </div>
+    </section>
+  </main>
+
+  <script src="js/config.js"></script>
+  <script src="js/common.js"></script>
+  <script>
+    (function () {
+      const { api, cfg, escapeHtml, matches, fmtTime, fmtClock, poll } = window.App;
+      const $ = (id) => document.getElementById(id);
+      let data = null;
+      let seen = null; // ID ที่เคยเห็นว่ามาแล้ว ใช้ไฮไลต์รายการใหม่
+
+      $('eventName').textContent = cfg.EVENT_NAME;
+      document.title = 'แดชบอร์ด · ' + cfg.EVENT_NAME;
+
+      const q = $('q');
+      const searchBox = $('searchBox');
+      q.addEventListener('input', () => { searchBox.classList.toggle('has-text', !!q.value); render(); });
+      searchBox.querySelector('.clear').addEventListener('click', () => { q.value = ''; searchBox.classList.remove('has-text'); render(); q.focus(); });
+
+      function render() {
+        if (!data) return;
+        const s = data.summary;
+        $('sTotal').textContent = s.total.toLocaleString('th-TH');
+        $('sArrived').textContent = s.arrived.toLocaleString('th-TH');
+        $('sRemaining').textContent = s.remaining.toLocaleString('th-TH');
+        $('sPeople').textContent = s.people.toLocaleString('th-TH');
+        const pct = s.total ? Math.round((s.arrived / s.total) * 100) : 0;
+        $('pct').textContent = pct + '%';
+        $('bar').setAttribute('aria-valuenow', pct);
+        $('bar').firstElementChild.style.width = pct + '%';
+
+        const query = q.value;
+        const arrived = data.companies.filter((c) => c.arrived)
+          .sort((a, b) => String(b.time).localeCompare(String(a.time)));
+        const pending = data.companies.filter((c) => !c.arrived);
+        const fa = arrived.filter((c) => matches(c, query));
+        const fp = pending.filter((c) => matches(c, query));
+
+        $('cArrived').textContent = query ? `${fa.length}/${arrived.length}` : arrived.length;
+        $('cPending').textContent = query ? `${fp.length}/${pending.length}` : pending.length;
+
+        $('listArrived').innerHTML = fa.length ? fa.map((c, i) => `
+          <li class="${seen && !seen.has(c.id) ? 'fresh' : ''}">
+            <span class="n">${i + 1}.</span>
+            <span class="name">${escapeHtml(c.name)} <span class="meta">${escapeHtml(c.id)}</span></span>
+            <span class="meta">${fmtTime(c.time)} · ${c.count} คน</span>
+          </li>`).join('') : `<li class="empty">${query ? 'ไม่พบบริษัทที่ค้นหา' : 'ยังไม่มีบริษัทลงทะเบียน'}</li>`;
+
+        $('listPending').innerHTML = fp.length ? fp.map((c, i) => `
+          <li>
+            <span class="n">${i + 1}.</span>
+            <span class="name">${escapeHtml(c.name)}</span>
+            <span class="meta">${escapeHtml(c.id)}</span>
+          </li>`).join('') : `<li class="empty">${query ? 'ไม่พบบริษัทที่ค้นหา' : (data.companies.length ? '🎉 มาครบทุกบริษัทแล้ว' : 'ยังไม่มีรายชื่อบริษัทใน Sheet')}</li>`;
+
+        seen = new Set(arrived.map((c) => c.id));
+      }
+
+      async function load() {
+        try {
+          data = await api.get('list');
+          $('notice').hidden = true;
+          $('live').classList.remove('error');
+          $('liveText').textContent = 'อัปเดตล่าสุด ' + fmtClock();
+          render();
+        } catch (e) {
+          $('live').classList.add('error');
+          $('liveText').textContent = 'โหลดข้อมูลไม่สำเร็จ';
+          if (!data || e.code === 'NO_CONFIG' || e.code === 'NOT_SETUP') {
+            $('notice').hidden = false;
+            $('notice').textContent = e.message;
+          }
+          throw e;
+        }
+      }
+
+      poll(load, cfg.REFRESH_MS);
+    })();
+  </script>
+</body>
+</html>

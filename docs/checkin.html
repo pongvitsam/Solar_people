@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ลงทะเบียนเข้างาน</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap">
+      <div class="brand"><i class="sun" aria-hidden="true"></i><span id="eventName">ลงทะเบียนเข้างาน</span></div>
+      <span class="who" id="who" hidden></span>
+      <a class="link" id="adminLink" href="admin.html" hidden>จัดการผู้ใช้</a>
+      <a class="link" href="index.html">แดชบอร์ด</a>
+      <button class="link" id="logout" type="button" hidden>ออกจากระบบ</button>
+    </div>
+  </header>
+
+  <!-- ===== Login ===== -->
+  <section id="loginView" class="center" hidden>
+    <form class="card login" id="loginForm" novalidate>
+      <h1>เข้าสู่ระบบเจ้าหน้าที่</h1>
+      <p>กรอกชื่อผู้ใช้เพื่อเริ่มลงทะเบียนบริษัท</p>
+      <div class="field">
+        <label for="username">ชื่อผู้ใช้ (Username)</label>
+        <input id="username" name="username" autocomplete="username" autocapitalize="off" spellcheck="false" required>
+      </div>
+      <p class="error-text" id="loginError" role="alert"></p>
+      <button class="btn btn-brand" style="width:100%" type="submit">เข้าสู่ระบบ</button>
+    </form>
+  </section>
+
+  <!-- ===== Check-in ===== -->
+  <main id="appView" class="wrap" hidden>
+    <div id="notice" class="notice" hidden></div>
+
+    <section class="card progress" style="margin-top:20px">
+      <div class="row">
+        <span>มาแล้ว <b id="sArrived">0</b> / <span id="sTotal">0</span> บริษัท · คงเหลือ <b id="sRemaining">0</b></span>
+        <span class="live" id="live"><i class="dot"></i><span id="liveText">กำลังโหลด…</span></span>
+      </div>
+      <div class="bar"><i id="barFill"></i></div>
+    </section>
+
+    <div class="toolbar">
+      <label class="search" id="searchBox">
+        <span class="sr-only">ค้นหาบริษัท</span>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input id="q" type="search" placeholder="พิมพ์ชื่อบริษัท หรือ PEA No. เพื่อค้นหา…" autocomplete="off">
+        <button class="clear" type="button" aria-label="ล้างคำค้นหา">✕</button>
+      </label>
+      <div class="chips" role="group" aria-label="กรองสถานะ">
+        <button class="chip" type="button" data-filter="all" aria-pressed="true">ทั้งหมด <b id="fAll">0</b></button>
+        <button class="chip" type="button" data-filter="pending" aria-pressed="false">ยังไม่มา <b id="fPending">0</b></button>
+        <button class="chip" type="button" data-filter="arrived" aria-pressed="false">มาแล้ว <b id="fArrived">0</b></button>
+      </div>
+    </div>
+
+    <section class="list" id="list" aria-live="polite"></section>
+  </main>
+
+  <!-- ===== Modal: confirm check-in ===== -->
+  <dialog id="checkinDialog">
+    <form method="dialog" id="checkinForm">
+      <h3>ยืนยันการลงทะเบียน</h3>
+      <p class="company" id="dlgName"></p>
+      <div class="field">
+        <label for="count">จำนวนผู้เข้างานของบริษัทนี้ (คน)</label>
+        <div class="stepper">
+          <button type="button" data-step="-1" aria-label="ลดจำนวน">−</button>
+          <input id="count" type="number" inputmode="numeric" min="1" max="999" value="1" required>
+          <button type="button" data-step="1" aria-label="เพิ่มจำนวน">+</button>
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn btn-ghost" type="button" id="dlgCancel">ยกเลิก</button>
+        <button class="btn btn-primary" type="submit" id="dlgOk">✔ ยืนยันมาแล้ว</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- ===== Modal: confirm undo ===== -->
+  <dialog id="undoDialog">
+    <form method="dialog" id="undoForm">
+      <h3>ยกเลิกการลงทะเบียน?</h3>
+      <p class="company" id="undoName"></p>
+      <p style="color:var(--muted);margin-top:-8px">สถานะจะกลับเป็น "ยังไม่มา" และบันทึกประวัติไว้ในแท็บ Log</p>
+      <div class="actions">
+        <button class="btn btn-ghost" type="button" id="undoCancel">ไม่ใช่</button>
+        <button class="btn btn-danger" type="submit" id="undoOk">ยกเลิกการลงทะเบียน</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="js/config.js"></script>
+  <script src="js/common.js"></script>
+  <script>
+    (function () {
+      const { api, cfg, session, escapeHtml, matches, fmtTime, fmtClock, toast, poll } = window.App;
+      const $ = (id) => document.getElementById(id);
+      const state = { data: null, filter: 'all', busy: new Set(), poller: null, target: null };
+      const MAX_SHOWN = 100; // แสดงสูงสุดครั้งละ 100 รายการ ให้ค้นหาเพื่อหาที่เหลือ
+
+      $('eventName').textContent = cfg.EVENT_NAME;
+
+      /* ---------- Auth ---------- */
+      function showLogin(message) {
+        session.clear();
+        $('appView').hidden = true;
+        $('loginView').hidden = false;
+        ['who', 'logout', 'adminLink'].forEach((id) => { $(id).hidden = true; });
+        $('loginError').textContent = message || '';
+        $('username').focus();
+      }
+
+      function showApp(s) {
+        $('loginView').hidden = true;
+        $('appView').hidden = false;
+        $('who').hidden = false;
+        $('who').textContent = '👤 ' + s.user.name;
+        $('logout').hidden = false;
+        $('adminLink').hidden = s.user.role !== 'admin';
+        if (!state.poller) state.poller = poll(load, cfg.REFRESH_MS);
+        else state.poller.now();
+        $('q').focus();
+      }
+
+      $('loginForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const username = $('username').value.trim();
+        if (!username) { $('loginError').textContent = 'กรุณากรอกชื่อผู้ใช้'; return; }
+        const btn = e.submitter || $('loginForm').querySelector('button');
+        btn.disabled = true;
+        $('loginError').textContent = '';
+        try {
+          const s = await api.post('login', { username });
+          session.set(s);
+          showApp(s);
+        } catch (err) {
+          $('loginError').textContent = err.message;
+        } finally {
+          btn.disabled = false;
+        }
+      });
+
+      $('logout').addEventListener('click', () => showLogin());
+
+      function handleAuthError(err) {
+        if (err.code === 'SESSION_EXPIRED') { showLogin(err.message); return true; }
+        return false;
+      }
+
+      /* ---------- Data ---------- */
+      async function load() {
+        if ($('appView').hidden) return;
+        if ($('checkinDialog').open || $('undoDialog').open) return; // ไม่รีเฟรชระหว่างกดยืนยัน
+        try {
+          setData(await api.get('list'));
+          $('notice').hidden = true;
+        } catch (e) {
+          $('live').classList.add('error');
+          $('liveText').textContent = 'โหลดข้อมูลไม่สำเร็จ';
+          if (!state.data) { $('notice').hidden = false; $('notice').textContent = e.message; }
+        }
+      }
+
+      function setData(d) {
+        state.data = d;
+        $('live').classList.remove('error');
+        $('liveText').textContent = 'อัปเดต ' + fmtClock();
+        render();
+      }
+
+      function render() {
+        const d = state.data;
+        if (!d) return;
+        const s = d.summary;
+        $('sArrived').textContent = s.arrived;
+        $('sTotal').textContent = s.total;
+        $('sRemaining').textContent = s.remaining;
+        $('barFill').style.width = (s.total ? (s.arrived / s.total) * 100 : 0) + '%';
+
+        const query = $('q').value;
+        const base = d.companies.filter((c) => matches(c, query));
+        $('fAll').textContent = base.length;
+        $('fPending').textContent = base.filter((c) => !c.arrived).length;
+        $('fArrived').textContent = base.filter((c) => c.arrived).length;
+
+        const shown = base
+          .filter((c) => state.filter === 'all' || (state.filter === 'arrived') === c.arrived)
+          .sort((a, b) => (a.arrived - b.arrived)
+            || (a.arrived ? String(b.time).localeCompare(String(a.time)) : 0));
+
+        if (!shown.length) {
+          $('list').innerHTML = `<div class="card empty">${
+            !d.companies.length ? 'ยังไม่มีรายชื่อบริษัทใน Google Sheet' :
+            query ? `ไม่พบบริษัทที่ตรงกับ "${escapeHtml(query)}"` :
+            state.filter === 'pending' ? '🎉 ลงทะเบียนครบทุกบริษัทแล้ว' : 'ไม่มีรายการ'}</div>`;
+          return;
+        }
+
+        const more = shown.length - MAX_SHOWN;
+        $('list').innerHTML = shown.slice(0, MAX_SHOWN).map((c) => {
+          const busy = state.busy.has(c.id);
+          return `
+          <article class="card item ${c.arrived ? 'arrived' : ''}">
+            <div class="info">
+              <div class="name">${escapeHtml(c.name)}</div>
+              <div class="meta">
+                <span class="tag">${escapeHtml(c.id)}</span>
+                ${c.mt ? `<span>${escapeHtml(c.mt)}</span>` : ''}
+                ${c.arrived
+                  ? `<span class="badge">✔ มาแล้ว</span><span>${fmtTime(c.time)}</span><span>${c.count} คน</span>${c.by ? `<span>บันทึกโดย ${escapeHtml(c.by)}</span>` : ''}`
+                  : '<span>ยังไม่มา</span>'}
+              </div>
+            </div>
+            ${c.arrived
+              ? `<button class="btn btn-ghost" data-undo="${escapeHtml(c.id)}" ${busy ? 'disabled' : ''}>ยกเลิก</button>`
+              : `<button class="btn btn-primary" data-checkin="${escapeHtml(c.id)}" ${busy ? 'disabled' : ''}>${busy ? 'กำลังบันทึก…' : '✔ มาแล้ว'}</button>`}
+          </article>`;
+        }).join('') + (more > 0 ? `<div class="card empty">และอีก ${more} รายการ — พิมพ์ชื่อหรือ PEA No. เพื่อค้นหา</div>` : '');
+      }
+
+      /* ---------- Filters ---------- */
+      const q = $('q');
+      q.addEventListener('input', () => { $('searchBox').classList.toggle('has-text', !!q.value); render(); });
+      $('searchBox').querySelector('.clear').addEventListener('click', () => {
+        q.value = ''; $('searchBox').classList.remove('has-text'); render(); q.focus();
+      });
+      document.querySelectorAll('.chip').forEach((chip) => chip.addEventListener('click', () => {
+        state.filter = chip.dataset.filter;
+        document.querySelectorAll('.chip').forEach((c) => c.setAttribute('aria-pressed', String(c === chip)));
+        render();
+      }));
+
+      /* ---------- Actions ---------- */
+      const byId = (id) => state.data.companies.find((c) => c.id === id);
+
+      $('list').addEventListener('click', (e) => {
+        const ci = e.target.closest('[data-checkin]');
+        const un = e.target.closest('[data-undo]');
+        if (ci) openCheckin(byId(ci.dataset.checkin));
+        if (un) openUndo(byId(un.dataset.undo));
+      });
+
+      function openCheckin(c) {
+        if (!c) return;
+        state.target = c;
+        $('dlgName').textContent = c.name;
+        $('count').value = 1;
+        $('checkinDialog').showModal();
+        $('dlgOk').focus();
+      }
+      function openUndo(c) {
+        if (!c) return;
+        state.target = c;
+        $('undoName').textContent = c.name;
+        $('undoDialog').showModal();
+      }
+
+      document.querySelectorAll('[data-step]').forEach((b) => b.addEventListener('click', () => {
+        const v = Math.min(999, Math.max(1, (parseInt($('count').value, 10) || 1) + Number(b.dataset.step)));
+        $('count').value = v;
+      }));
+      $('dlgCancel').addEventListener('click', () => $('checkinDialog').close());
+      $('undoCancel').addEventListener('click', () => $('undoDialog').close());
+
+      $('checkinForm').addEventListener('submit', (e) => {
+        e.preventDefault();
+        const count = parseInt($('count').value, 10);
+        if (!(count >= 1 && count <= 999)) { toast('จำนวนคนต้องอยู่ระหว่าง 1–999', 'error'); return; }
+        $('checkinDialog').close();
+        run('checkin', state.target, { count }, `✔ ลงทะเบียน "${state.target.name}" แล้ว (${count} คน)`);
+      });
+      $('undoForm').addEventListener('submit', (e) => {
+        e.preventDefault();
+        $('undoDialog').close();
+        run('undo', state.target, {}, `ยกเลิกการลงทะเบียน "${state.target.name}" แล้ว`);
+      });
+
+      async function run(action, c, extra, okMsg) {
+        const s = session.get();
+        if (!s) { showLogin(); return; }
+        state.busy.add(c.id);
+        render();
+        try {
+          setData(await api.post(action, Object.assign({ token: s.token, id: c.id }, extra)));
+          toast(okMsg, 'ok');
+        } catch (err) {
+          if (!handleAuthError(err)) toast(err.message, 'error');
+          state.poller && state.poller.now();
+        } finally {
+          state.busy.delete(c.id);
+          render();
+        }
+      }
+
+      /* ---------- Start ---------- */
+      const s = session.get();
+      if (s && s.token) {
+        showApp(s);
+        // ตรวจว่า session ยังใช้ได้อยู่
+        api.post('me', { token: s.token }).then((r) => {
+          s.user = r.user; session.set(s); showApp(s);
+        }).catch((err) => handleAuthError(err));
+      } else {
+        showLogin();
+      }
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>จัดการผู้ใช้</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap">
+      <div class="brand"><i class="sun" aria-hidden="true"></i><span>จัดการผู้ใช้</span></div>
+      <span class="who" id="who"></span>
+      <a class="link" href="checkin.html">ลงทะเบียน</a>
+      <a class="link" href="index.html">แดชบอร์ด</a>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <div id="notice" class="notice" hidden></div>
+
+    <div id="content" hidden>
+      <div class="section-title">
+        <h1>เพิ่มเจ้าหน้าที่</h1>
+        <a class="btn btn-ghost" id="sheetLink" href="#" target="_blank" rel="noopener" hidden>เปิด Google Sheet ↗</a>
+      </div>
+      <form class="card form-row" id="addForm" novalidate>
+        <div class="field">
+          <label for="nUser">Username</label>
+          <input id="nUser" autocapitalize="off" spellcheck="false" placeholder="เช่น staff01" required>
+        </div>
+        <div class="field">
+          <label for="nName">ชื่อที่แสดง</label>
+          <input id="nName" placeholder="เช่น สมชาย ใจดี">
+        </div>
+        <div class="field">
+          <label for="nRole">สิทธิ์</label>
+          <select id="nRole">
+            <option value="staff">เจ้าหน้าที่</option>
+            <option value="admin">ผู้ดูแลระบบ</option>
+          </select>
+        </div>
+        <button class="btn btn-brand" type="submit">+ เพิ่มผู้ใช้</button>
+      </form>
+
+      <div class="section-title"><h2>รายชื่อผู้ใช้ <span id="userCount" style="color:var(--muted);font-weight:400"></span></h2></div>
+      <div class="card table-wrap">
+        <table>
+          <thead><tr><th>Username</th><th>ชื่อที่แสดง</th><th>สิทธิ์</th><th>สถานะ</th><th></th></tr></thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <p style="color:var(--muted);font-size:.9rem;margin:12px 0 40px">ผู้ใช้ที่ถูกปิดหรือลบจะใช้งานต่อไม่ได้ทันที</p>
+    </div>
+  </main>
+
+  <script src="js/config.js"></script>
+  <script src="js/common.js"></script>
+  <script>
+    (function () {
+      const { api, session, escapeHtml, toast } = window.App;
+      const $ = (id) => document.getElementById(id);
+      const s = session.get();
+
+      function fail(msg, toLogin) {
+        $('content').hidden = true;
+        $('notice').hidden = false;
+        $('notice').innerHTML = escapeHtml(msg) + (toLogin ? ' — <a href="checkin.html">เข้าสู่ระบบ</a>' : '');
+      }
+
+      if (!s || !s.token) { fail('กรุณาเข้าสู่ระบบด้วยบัญชีผู้ดูแลระบบก่อน', true); return; }
+      $('who').textContent = '👤 ' + s.user.name;
+
+      function render(d) {
+        $('content').hidden = false;
+        $('notice').hidden = true;
+        if (d.sheetUrl) { $('sheetLink').href = d.sheetUrl; $('sheetLink').hidden = false; }
+        $('userCount').textContent = `(${d.users.length})`;
+        const me = s.user.username.toLowerCase();
+        $('rows').innerHTML = d.users.map((u) => {
+          const self = u.username.toLowerCase() === me;
+          const un = escapeHtml(u.username);
+          return `<tr class="${u.active ? '' : 'off'}">
+            <td><b>${un}</b>${self ? ' <small style="color:var(--muted)">(คุณ)</small>' : ''}</td>
+            <td>${escapeHtml(u.name)}</td>
+            <td><span class="role ${u.role}">${u.role === 'admin' ? 'ผู้ดูแลระบบ' : 'เจ้าหน้าที่'}</span></td>
+            <td>${u.active ? 'ใช้งาน' : 'ปิดใช้งาน'}</td>
+            <td style="text-align:right">
+              ${self ? '' : `
+                <button class="btn btn-ghost" data-act="role" data-u="${un}" data-v="${u.role === 'admin' ? 'staff' : 'admin'}">${u.role === 'admin' ? 'ลดเป็นเจ้าหน้าที่' : 'ตั้งเป็นแอดมิน'}</button>
+                <button class="btn btn-ghost" data-act="active" data-u="${un}" data-v="${u.active ? '0' : '1'}">${u.active ? 'ปิดใช้งาน' : 'เปิดใช้งาน'}</button>
+                <button class="btn btn-ghost" data-act="delete" data-u="${un}">ลบ</button>`}
+            </td>
+          </tr>`;
+        }).join('');
+      }
+
+      async function call(action, payload, okMsg) {
+        try {
+          render(await api.post(action, Object.assign({ token: s.token }, payload)));
+          if (okMsg) toast(okMsg, 'ok');
+          return true;
+        } catch (err) {
+          if (err.code === 'SESSION_EXPIRED') { session.clear(); fail(err.message, true); }
+          else if (err.code === 'FORBIDDEN' && action === 'users') fail('หน้านี้สำหรับผู้ดูแลระบบเท่านั้น', false);
+          else toast(err.message, 'error');
+          return false;
+        }
+      }
+
+      $('addForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const username = $('nUser').value.trim();
+        if (!/^[A-Za-z0-9._-]{2,30}$/.test(username)) {
+          toast('Username ใช้ได้เฉพาะ a-z, 0-9, . _ - ความยาว 2–30 ตัว', 'error');
+          $('nUser').focus();
+          return;
+        }
+        const btn = e.submitter;
+        if (btn) btn.disabled = true;
+        const ok = await call('addUser', { username, name: $('nName').value.trim(), role: $('nRole').value }, `เพิ่มผู้ใช้ ${username} แล้ว`);
+        if (btn) btn.disabled = false;
+        if (ok) { $('addForm').reset(); $('nUser').focus(); }
+      });
+
+      $('rows').addEventListener('click', (e) => {
+        const b = e.target.closest('button[data-act]');
+        if (!b) return;
+        const username = b.dataset.u;
+        if (b.dataset.act === 'delete') {
+          if (confirm(`ลบผู้ใช้ "${username}" ออกจากระบบ?`)) call('deleteUser', { username }, `ลบ ${username} แล้ว`);
+        } else if (b.dataset.act === 'active') {
+          call('updateUser', { username, active: b.dataset.v === '1' }, 'บันทึกแล้ว');
+        } else if (b.dataset.act === 'role') {
+          call('updateUser', { username, role: b.dataset.v }, 'บันทึกแล้ว');
+        }
+      });
+
+      call('users', {});
+    })();
+  </script>
+</body>
+</html>
