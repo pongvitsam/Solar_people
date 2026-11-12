@@ -13,12 +13,12 @@
  */
 
 const SHEET = { COMPANIES: 'Companies', USERS: 'Users', LOG: 'Log', REG: 'Registrations' };
-const BUILD = 'review-fix-1'; // ใช้ตรวจว่า deployment ใหม่ใช้งานครบทุกเครื่องแล้ว (?action=ping)
+const BUILD = 'plain-pw-1'; // ใช้ตรวจว่า deployment ใหม่ใช้งานครบทุกเครื่องแล้ว (?action=ping)
 
 const COMPANY_HEADERS = ['PEA No.', 'ชื่อบริษัท', 'เลขที่ มท.', 'ลงวันที่', 'สถานะ', 'จำนวนคน', 'เวลาเข้างาน', 'ผู้บันทึก'];
 const C = { ID: 0, NAME: 1, MT: 2, DATE: 3, STATUS: 4, COUNT: 5, TIME: 6, BY: 7 };
 
-const USER_HEADERS = ['Username', 'ชื่อที่แสดง', 'Role', 'Active', 'สร้างเมื่อ', 'PasswordHash'];
+const USER_HEADERS = ['Username', 'ชื่อที่แสดง', 'Role', 'Active', 'สร้างเมื่อ', 'รหัสผ่าน'];
 const U = { USERNAME: 0, NAME: 1, ROLE: 2, ACTIVE: 3, CREATED: 4, PASS: 5 };
 
 const LOG_HEADERS = ['เวลา', 'Action', 'CompanyID', 'ชื่อบริษัท', 'จำนวนคน', 'ผู้ทำรายการ'];
@@ -666,14 +666,15 @@ function clearTestRegistrations() {
 }
 
 /* ---------- Cache รายชื่อผู้ใช้ ----------
- * แก้ผ่านหน้า admin: มีผลทันที / แก้ในแท็บ Users โดยตรง: มีผลภายใน 2 นาที
+ * แก้ผ่านหน้า admin: มีผลทันที / แก้ Username หรือรหัสผ่านในแท็บ Users โดยตรง: มีผลภายใน 30 วินาที
  */
-const USERS_TTL_SEC = 120;
+const USERS_TTL_SEC = 30;
 
 function userValues_() {
   const cache = CacheService.getScriptCache();
   const hit = cache.get('users');
   if (hit) return JSON.parse(hit);
+  ensureUsersPasswordColumn_();
   const values = readUsers_().values.map((r) => [r[U.USERNAME], r[U.NAME], r[U.ROLE], r[U.ACTIVE], '', String(r[U.PASS] || '')]);
   cache.put('users', JSON.stringify(values), USERS_TTL_SEC);
   return values;
@@ -712,9 +713,30 @@ function hashPassword_(password, salt) {
   return salt + '$' + h;
 }
 
+const HASH_RE = /^[0-9a-f]{32}\$[0-9a-f]{64}$/;
+
+/**
+ * รหัสผ่านเก็บเป็นตัวอักษรธรรมดาในแท็บ Users คอลัมน์ "รหัสผ่าน" (แก้ใน Sheet ได้โดยตรง)
+ * ถ้าค่าเป็นรูปแบบเข้ารหัสเดิม (salt$hash) ยังตรวจได้ จนกว่าจะพิมพ์รหัสใหม่ทับ
+ */
 function checkPassword_(password, stored) {
-  if (!stored || stored.indexOf('$') < 0) return false;
-  return hashPassword_(password, stored.split('$')[0]) === stored;
+  stored = String(stored == null ? '' : stored).trim();
+  password = String(password == null ? '' : password).trim();
+  if (!stored || !password) return false;
+  if (HASH_RE.test(stored)) return hashPassword_(password, stored.split('$')[0]) === stored;
+  return password === stored;
+}
+
+/** ครั้งแรกหลังอัปเดต: แสดงคอลัมน์รหัสผ่าน ตั้งหัวคอลัมน์ และตั้งเป็นข้อความ (เลข 0 นำหน้าไม่หาย) */
+function ensureUsersPasswordColumn_() {
+  const props = PropertiesService.getScriptProperties();
+  if (props.getProperty('USERS_PW_PLAIN') === '1') return;
+  const sh = ss_().getSheetByName(SHEET.USERS);
+  const col = U.PASS + 1;
+  sh.getRange(1, col).setValue('รหัสผ่าน').setFontWeight('bold').setBackground('#1f3b57').setFontColor('#ffffff');
+  sh.getRange(2, col, Math.max(sh.getMaxRows() - 1, 1), 1).setNumberFormat('@');
+  sh.showColumns(col);
+  props.setProperty('USERS_PW_PLAIN', '1');
 }
 
 function validPassword_(pw) {
@@ -737,16 +759,16 @@ function randomPassword_() {
  */
 function initPasswords() {
   const { sh, values } = readUsers_();
-  sh.getRange(1, U.PASS + 1).setValue('PasswordHash').setFontWeight('bold').setBackground('#1f3b57').setFontColor('#ffffff');
+  PropertiesService.getScriptProperties().deleteProperty('USERS_PW_PLAIN');
+  ensureUsersPasswordColumn_();
   const out = [];
   values.forEach((r, i) => {
     const username = String(r[U.USERNAME]).trim();
     if (!username || String(r[U.PASS] || '')) return;
     const pw = randomPassword_();
-    sh.getRange(i + 2, U.PASS + 1).setValue(hashPassword_(pw));
+    sh.getRange(i + 2, U.PASS + 1).setValue(pw);
     out.push(`${username}  →  ${pw}`);
   });
-  sh.hideColumns(U.PASS + 1);
   invalidateUsers_();
   Logger.log(out.length ? 'รหัสผ่านใหม่ (จดไว้แล้วปิดหน้านี้):\n' + out.join('\n') : 'ทุกบัญชีมีรหัสผ่านแล้ว');
 }
@@ -805,7 +827,7 @@ function setPassword_(p) {
     const { sh, values } = readUsers_();
     const i = findUser_(values, p.username);
     if (i < 0) throw new AppError('NOT_FOUND', 'ไม่พบผู้ใช้');
-    sh.getRange(i + 2, U.PASS + 1).setValue(hashPassword_(pw));
+    sh.getRange(i + 2, U.PASS + 1).setNumberFormat('@').setValue(pw);
     invalidateUsers_();
   } finally {
     lock.releaseLock();
@@ -830,13 +852,14 @@ function addUser_(p) {
   if (!USERNAME_RE.test(username)) {
     throw new AppError('BAD_INPUT', 'Username ใช้ได้เฉพาะ a-z, 0-9, . _ - ความยาว 2–30 ตัว');
   }
-  const pwHash = hashPassword_(validPassword_(p.password));
+  const pw = validPassword_(p.password);
   const lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
     const { sh, values } = readUsers_();
     if (findUser_(values, username) >= 0) throw new AppError('DUPLICATE', 'มี Username นี้อยู่แล้ว');
-    sh.appendRow([username, name, role, true, new Date(), pwHash]);
+    sh.appendRow([username, name, role, true, new Date(), pw]);
+    sh.getRange(sh.getLastRow(), U.PASS + 1).setNumberFormat('@').setValue(pw);
     sh.getRange(sh.getLastRow(), U.ACTIVE + 1).insertCheckboxes().check();
     invalidateUsers_();
   } finally {
