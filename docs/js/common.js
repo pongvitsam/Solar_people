@@ -268,5 +268,14 @@
   window.addEventListener('offline', updateOnline);
   document.addEventListener('DOMContentLoaded', updateOnline);
 
+  // ปุ่มออกจากระบบบนเมนู (หน้าอื่นนอกจากเช็คอิน): แสดงเมื่อมี session และกลับไปหน้าเข้าสู่ระบบเมื่อกด
+  document.addEventListener('DOMContentLoaded', () => {
+    const btn = document.querySelector('[data-global-logout]');
+    if (!btn) return;
+    const s = session.get();
+    btn.hidden = !(s && s.token);
+    btn.addEventListener('click', () => { session.clear(); location.href = 'checkin.html'; });
+  });
+
   window.App = { cfg, api, session, list, summarize, validate, postRetry, ApiError, escapeHtml, matches, fmtTime, fmtClock, toast, poll };
 })();

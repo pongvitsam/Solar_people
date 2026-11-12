@@ -28,6 +28,7 @@
       <a class="link" href="index.html">แดชบอร์ด</a>
       <a class="link" href="staff-register.html" aria-current="page">ลงทะเบียน</a>
       <a class="link" href="manual.pdf" download="คู่มือการใช้งาน.pdf">คู่มือ (PDF)</a>
+      <button class="link" id="logout" data-global-logout type="button" hidden>ออกจากระบบ</button>
     </div>
   </header>
 
@@ -103,7 +104,7 @@
   </main>
 
   <script src="js/config.js?v=14"></script>
-  <script src="js/common.js?v=14"></script>
+  <script src="js/common.js?v=15"></script>
   <script>
     (function () {
       const { session, escapeHtml, matches, fmtClock, toast } = window.App;
