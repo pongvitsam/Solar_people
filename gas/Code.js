@@ -658,9 +658,9 @@ function companyPeople_(p) {
   return { people };
 }
 
-/** รายชื่อผู้เข้างานทั้งหมด สำหรับส่งออก Excel/PDF (เฉพาะแอดมิน ไม่รวมข้อมูลทดสอบ) */
+/** รายชื่อผู้เข้างานทั้งหมด สำหรับส่งออก Excel/PDF (เจ้าหน้าที่ที่ล็อกอิน ไม่รวมข้อมูลทดสอบ) */
 function exportPeople_(p) {
-  auth_(p.token, true);
+  auth_(p.token);
   const sh = ss_().getSheetByName(SHEET.REG);
   const people = [];
   if (sh && sh.getLastRow() >= 2) {

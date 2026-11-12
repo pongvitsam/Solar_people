@@ -6,14 +6,14 @@
  * - API (script.google.com) และทุกอย่างอื่น: ไม่แตะ ไม่ cache — ข้อมูลต้องสดเสมอ
  * เปลี่ยน VERSION เมื่อเพิ่ม/ลบไฟล์ใน SHELL
  */
-const VERSION = 'v5';
+const VERSION = 'v6';
 const SHELL_CACHE = 'shell-' + VERSION;
 const FONT_CACHE = 'fonts-' + VERSION;
 const NETWORK_TIMEOUT_MS = 4000;
 
 const SHELL = [
   './', './index.html', './checkin.html', './register.html', './admin.html', './staff-register.html',
-  './styles.css', './js/config.js', './js/common.js', './manifest.json',
+  './styles.css', './js/config.js', './js/common.js', './js/export.js', './manifest.json',
   './img/pea-logo.png', './img/pea-emblem.png', './img/icon-192.png', './img/apple-touch-icon.png', './img/favicon-32.png',
 ];
 

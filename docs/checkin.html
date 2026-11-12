@@ -17,7 +17,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="styles.css?v=13">
+  <link rel="stylesheet" href="styles.css?v=14">
 </head>
 <body>
   <header class="topbar">
@@ -61,6 +61,15 @@
       </div>
       <div class="bar"><i id="barFill"></i></div>
     </section>
+
+    <details class="card export-details no-print">
+      <summary>⬇ ส่งออกรายชื่อ (Excel / PDF)</summary>
+      <div class="export-panel">
+        <div class="export-row"><div><b>บริษัทที่ลงทะเบียนแล้ว</b><span class="muted">รวมนอกรายชื่อ · จำนวนคน · เวลาเข้างาน</span></div><span class="export-btns"><button class="btn btn-brand" type="button" data-export="arrived" data-fmt="xlsx">⬇ Excel</button><button class="btn btn-ghost" type="button" data-export="arrived" data-fmt="pdf">⬇ PDF</button></span></div>
+        <div class="export-row"><div><b>บริษัทที่ยังไม่มา</b><span class="muted">PEA No. · ชื่อบริษัท</span></div><span class="export-btns"><button class="btn btn-brand" type="button" data-export="pending" data-fmt="xlsx">⬇ Excel</button><button class="btn btn-ghost" type="button" data-export="pending" data-fmt="pdf">⬇ PDF</button></span></div>
+        <div class="export-row"><div><b>ผู้เข้างานรายคน</b><span class="muted">ชื่อ · ตำแหน่ง · อีเมล · เบอร์โทร (ไม่รวมข้อมูลทดสอบ)</span></div><span class="export-btns"><button class="btn btn-brand" type="button" data-export="people" data-fmt="xlsx">⬇ Excel</button><button class="btn btn-ghost" type="button" data-export="people" data-fmt="pdf">⬇ PDF</button></span></div>
+      </div>
+    </details>
 
     <div class="toolbar">
       <label class="search" id="searchBox">
@@ -140,8 +149,10 @@
     </form>
   </dialog>
 
-  <script src="js/config.js?v=13"></script>
-  <script src="js/common.js?v=13"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="js/config.js?v=14"></script>
+  <script src="js/common.js?v=14"></script>
+  <script src="js/export.js?v=14"></script>
   <script>
     (function () {
       const { api, cfg, session, escapeHtml, matches, fmtTime, fmtClock, toast, poll } = window.App;
@@ -528,6 +539,8 @@
           if (!state.pending.size && state.poller) state.poller.now();
         }
       }
+
+      App.exports.bind((err) => showLogin(err.message));
 
       /* ---------- Start ---------- */
       const snap = App.list.snapshot();
