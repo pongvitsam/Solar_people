@@ -29,6 +29,19 @@ const USERNAME_RE = /^[A-Za-z0-9._-]{2,30}$/;
 /* Setup                                                              */
 /* ------------------------------------------------------------------ */
 
+/** Google Sheet ที่ใช้เป็นฐานข้อมูล ("Solar People - ลงทะเบียนเข้างาน" ใน Drive ของเจ้าของสคริปต์) */
+const TARGET_SPREADSHEET_ID = '1NKj9w01h5orGZ52fBKlm7zbon1O0fjLZgVklt_FUQ4E';
+
+/**
+ * เชื่อมระบบเข้ากับ Sheet ตาม TARGET_SPREADSHEET_ID แล้วสร้างแท็บ/ใส่รายชื่อให้
+ * (รันใน editor หนึ่งครั้ง — ไม่ลบข้อมูลเดิมในแท็บอื่นของ Sheet)
+ */
+function connectSheet() {
+  const ss = SpreadsheetApp.openById(TARGET_SPREADSHEET_ID); // ถ้าไม่มีสิทธิ์แก้ไข จะ error ตรงนี้
+  PropertiesService.getScriptProperties().setProperty('SPREADSHEET_ID', ss.getId());
+  return setup();
+}
+
 function setup() {
   const props = PropertiesService.getScriptProperties();
   let ss = null;
@@ -69,8 +82,11 @@ function setup() {
   const log = ensureSheet_(ss, SHEET.LOG, LOG_HEADERS);
   log.getRange('A:A').setNumberFormat('dd/MM/yyyy HH:mm:ss');
 
+  // ลบแท็บว่างที่ Google สร้างให้อัตโนมัติ (เฉพาะกรณีว่างจริง ๆ)
   const defaultSheet = ss.getSheetByName('Sheet1') || ss.getSheetByName('ชีต1');
-  if (defaultSheet && ss.getSheets().length > 1) ss.deleteSheet(defaultSheet);
+  if (defaultSheet && ss.getSheets().length > 1 && defaultSheet.getLastRow() === 0 && defaultSheet.getLastColumn() === 0) {
+    ss.deleteSheet(defaultSheet);
+  }
 
   Logger.log('✅ Spreadsheet พร้อมใช้งาน: ' + ss.getUrl());
   return ss.getUrl();

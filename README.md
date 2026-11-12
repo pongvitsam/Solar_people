@@ -15,7 +15,10 @@
 ## ติดตั้งครั้งแรก
 
 1. เปิด Apps Script editor: `clasp open-script`
-2. เลือกฟังก์ชัน `setup` แล้วกด **Run** จากนั้นกดอนุญาตสิทธิ์ เมื่อเสร็จจะได้ลิงก์ Sheet ใน Execution log
+2. เลือกฟังก์ชัน `connectSheet` แล้วกด **Run** จากนั้นกดอนุญาตสิทธิ์
+   - ระบบจะใช้ Sheet ตาม `TARGET_SPREADSHEET_ID` ใน `gas/Code.js` สร้างแท็บ Companies/Users/Log และใส่รายชื่อ 725 บริษัทให้
+   - บัญชีเจ้าของสคริปต์ต้องมีสิทธิ์แก้ไข Sheet นั้น
+   - ถ้าจะให้สร้าง Sheet ใหม่แทน ให้รัน `setup`
 3. เปิด Web App URL ใน `docs/js/config.js` (ต่อท้ายด้วย `?action=list`) ต้องเห็นข้อมูล JSON
    - ถ้าขึ้น "การเข้าถึงถูกปฏิเสธ" ให้ไปที่ Deploy → Manage deployments → แก้ไข แล้วตั้งค่า
      - Execute as: **Me**
