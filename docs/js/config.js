@@ -2,6 +2,6 @@
 window.APP_CONFIG = {
   API_URL: 'https://script.google.com/macros/s/AKfycbyXmFKw0Ohu-Qa0rhSKyVGj78Um_yjAdd0zzdIl1u3UUPs3gZMWHx7CGmbCJBCGpbE9Ng/exec',
   ORG_NAME: 'การไฟฟ้าส่วนภูมิภาค (กฟภ.)',
-  EVENT_NAME: 'ลงทะเบียนเข้างานโซลาร์ภาคประชาชน',
+  EVENT_NAME: 'ลงทะเบียนเข้างาน โซลาร์ภาคประชาชน', // เว้นวรรคเพื่อกำหนดจุดตัดบรรทัดบนมือถือ
   REFRESH_MS: 10000, // รีเฟรชข้อมูลอัตโนมัติทุก 10 วินาที
 };

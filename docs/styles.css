@@ -5,9 +5,9 @@
   --border: #dde3e9;
   --text: #15202b;
   --muted: #5b6b7a;
-  --brand: #5b2179; /* โทนม่วง กฟภ. */
+  --brand: #74065f; /* ม่วง กฟภ. (จากโลโก้) */
   --brand-ink: #ffffff;
-  --topbar: #5b2179;
+  --topbar: #74065f;
   --topbar-ink: #ffffff;
   --accent: #f2a516;
   --accent-soft: #fff4dc;
@@ -29,7 +29,7 @@
     --text: #e8eef4;
     --muted: #93a4b5;
     --brand: #c7a2e0;
-    --topbar: #45185e;
+    --topbar: #5a0549;
     --brand-ink: #0f1720;
     --accent: #f5b638;
     --accent-soft: #3a2d10;
@@ -76,9 +76,14 @@ button, input, select { font: inherit; color: inherit; }
   background: radial-gradient(circle at 50% 50%, var(--accent) 45%, transparent 47%),
               conic-gradient(from 0deg, var(--accent) 0 8%, transparent 0 12.5%, var(--accent) 0 20.5%, transparent 0 25%, var(--accent) 0 33%, transparent 0 37.5%, var(--accent) 0 45.5%, transparent 0 50%, var(--accent) 0 58%, transparent 0 62.5%, var(--accent) 0 70.5%, transparent 0 75%, var(--accent) 0 83%, transparent 0 87.5%, var(--accent) 0 95.5%, transparent 0);
 }
+.logo { flex: none; background: #fff; border-radius: 10px; padding: 4px 8px; display: inline-flex; box-shadow: 0 1px 3px rgba(0,0,0,.25); }
+.logo img { display: block; height: 40px; width: auto; }
+@media (max-width: 520px) { .logo img { height: 30px; } .logo { padding: 3px 6px; } }
 .brand-text { display: grid; min-width: 0; line-height: 1.25; }
 .brand-text small { font-size: .78rem; font-weight: 500; opacity: .85; letter-spacing: .01em; }
-.brand-text span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 1.1rem; }
+.brand-text span { font-size: 1.1rem; word-break: keep-all; }
+.brand { flex: 1 1 0; }
+@media (max-width: 520px) { .brand-text span { font-size: .95rem; } .brand-text small { font-size: .7rem; } .topbar .link { padding: 5px 10px; font-size: .82rem; } }
 .topbar .who { font-size: .9rem; opacity: .9; }
 .topbar .link { text-decoration: none; font-size: .9rem; padding: 6px 12px; border-radius: 999px; border: 1px solid currentColor; opacity: .9; background: transparent; cursor: pointer; }
 .topbar .link:hover { opacity: 1; }
@@ -230,3 +235,4 @@ th { font-size: .85rem; color: var(--muted); font-weight: 500; }
   .form-row { grid-template-columns: 1fr; }
   .topbar .who { display: none; }
 }
+.nw { white-space: nowrap; font-weight: inherit; }

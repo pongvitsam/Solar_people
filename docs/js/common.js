@@ -150,7 +150,10 @@
     const org = document.getElementById('orgName');
     if (org) org.textContent = cfg.ORG_NAME || '';
     const ev = document.getElementById('eventName');
-    if (ev && !ev.dataset.fixed) ev.textContent = cfg.EVENT_NAME;
+    if (ev && !ev.dataset.fixed) {
+      // แต่ละวลีไม่ตัดกลางคำ ตัดบรรทัดได้เฉพาะที่เว้นวรรค
+      ev.innerHTML = String(cfg.EVENT_NAME).split(/\s+/).map((w) => `<b class="nw">${escapeHtml(w)}</b>`).join(' ');
+    }
   });
 
   window.App = { cfg, api, session, ApiError, escapeHtml, matches, fmtTime, fmtClock, toast, poll };
