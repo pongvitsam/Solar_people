@@ -379,3 +379,6 @@ body { padding-bottom: env(safe-area-inset-bottom); }
 .export-details > summary { cursor: pointer; padding: 12px 16px; font-weight: 600; list-style: none; }
 .export-details > summary::-webkit-details-marker { display: none; }
 .export-details[open] > summary { border-bottom: 1px solid var(--border); }
+
+/* เมนูด้านบน: ลำดับคงที่ทุกหน้า ไฮไลต์หน้าปัจจุบัน */
+.topbar .link[aria-current="page"] { background: rgba(255,255,255,.2); opacity: 1; font-weight: 600; }
