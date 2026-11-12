@@ -187,8 +187,7 @@
         e.preventDefault();
         const code = $('codeInput').value.trim().toUpperCase();
         if (!/^[A-Z0-9]{4,20}$/.test(code)) { toast('รหัสงานใช้ A-Z และ 0-9 ความยาว 4–20 ตัว', 'error'); return; }
-        if (!confirm('เปลี่ยนรหัสงานเป็น ' + code + ' ?
-QR Code ที่พิมพ์ไว้ก่อนหน้าจะใช้ลงทะเบียนไม่ได้')) return;
+        if (!confirm('เปลี่ยนรหัสงานเป็น ' + code + ' ?\nQR Code ที่พิมพ์ไว้ก่อนหน้าจะใช้ลงทะเบียนไม่ได้')) return;
         try {
           const r = await api.post('setEventCode', { token: s.token, code });
           showCode(r.code);
